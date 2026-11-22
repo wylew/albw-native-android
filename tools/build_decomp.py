@@ -33,6 +33,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "build", "decomp")
 TARGET = "i686-linux-gnu"
 ARCH64 = False  # --arch x86_64 (build/decomp64): low-4GB mode, see native/64BIT.md
+ARM32 = False   # --arch arm32 (build/decomp-arm32): Android armeabi-v7a, NDK clang (README: Android port)
 COMPAT = os.path.join(ROOT, "native", "albw_native.h")
 
 # ------------------------------------------------------------------ rewrites
@@ -771,11 +772,15 @@ def build_one(job):
            "-fdata-sections", "-fno-common", "-fno-strict-aliasing", "-fwrapv", "-fno-exceptions",
            "-ferror-limit=3", "-include", COMPAT,
            # float model = the 3DS VFP (native/gameplay/AUDIT.md): single precision in SSE
-           # registers on i686 too (no x87 excess precision), no FMA contraction (vmla is unfused)
-           "-msse2", "-mfpmath=sse", "-ffp-contract=off",
+           # registers on i686 too (no x87 excess precision), no FMA contraction (vmla is unfused).
+           # armeabi-v7a: VFP like the 3DS (NEON allowed), softfp calling convention (Android ABI)
+           *(["-mfpu=neon", "-mfloat-abi=softfp"] if ARM32 else ["-msse2", "-mfpmath=sse"]),
+           "-ffp-contract=off",
            "-I", os.path.join(OUT, "shared", "include"), "-I", os.path.dirname(src)]
     if ARCH64:
         cmd += ["-fms-extensions", "-Wno-error=int-to-pointer-cast"]  # __ptr32 (ALBW_GP)
+    if ARM32:
+        cmd += ["-fPIC"]  # linked into libmain.so (NDK clang defaults to PIE)
     if v4_enabled():
         cmd += ["-DALBW_V4"]  # ghidra_types.h round-3 helpers
         if v4_stage() >= 2:
@@ -1025,10 +1030,14 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--snapshot", default="",
                     help="build from a source snapshot (tools/export_snapshot.py: decomp/), no Ghidra dump or decomp repo")
-    ap.add_argument("--arch", choices=("x86", "x86_64"), default="x86",
-                    help="x86 = 32-bit intermediate build; x86_64 = the release target (tracks 64-bit health)")
+    ap.add_argument("--arch", choices=("x86", "x86_64", "arm32"), default="x86",
+                    help="x86 = 32-bit intermediate build; x86_64 = the release target (tracks 64-bit health); "
+                         "arm32 = Android armeabi-v7a (NDK clang + LLVM tools first in PATH: tools/build_decomp_arm32.sh)")
     a = ap.parse_args()
-    global OUT, TARGET, CTORS, ARCH64
+    global OUT, TARGET, CTORS, ARCH64, ARM32
+    if a.arch == "arm32":
+        OUT, TARGET, ARM32 = os.path.join(ROOT, "build", "decomp-arm32"), "armv7a-linux-androideabi24", True
+        os.environ["ALBW_ARCH"] = "arm32"
     if a.arch == "x86_64":
         OUT, TARGET, ARCH64 = os.path.join(ROOT, "build", "decomp64"), "x86_64-linux-gnu", True
         os.environ["ALBW_ARCH"] = "x86_64"  # gen_stubs.system_symbols(): 64-bit libraries
