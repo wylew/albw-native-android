@@ -8,6 +8,7 @@
  *   /sdcard/Android/data/org.albw.port/files/
  *     rom.3ds            your decrypted EU ROM (adb push; a file picker comes in step 7)
  *     share/ config/ state/   saves, settings, logs (portable mode, runtime/entry.c)
+ *     albw.env           optional KEY=VALUE lines (debug environment variables)
  * stdout / stderr go to logcat (tag "albw"). */
 #if defined(__ANDROID__)
 #define _GNU_SOURCE
@@ -103,6 +104,20 @@ int SDL_main(int argc, char **argv) {
         return 1;
     }
     mkdir(ext, 0755);
+    {   /* debug options: KEY=VALUE lines in <files>/albw.env (adb push), e.g. ALBW_GFX_TRACE=1 */
+        char envf[1024], line[1024];
+        snprintf(envf, sizeof envf, "%s/albw.env", ext);
+        FILE *f = fopen(envf, "r");
+        while (f && fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            char *eq = strchr(line, '=');
+            if (line[0] == '#' || !eq) continue;
+            *eq = 0;
+            setenv(line, eq + 1, 1);
+            fprintf(stderr, "android: %s=%s (albw.env)\n", line, eq + 1);
+        }
+        if (f) fclose(f);
+    }
     setenv("HOME", ext, 0);
     setenv("ALBW_DATA_DIR", ext, 0);   /* portable mode: share/ config/ state/ under it */
     char rom[1024];

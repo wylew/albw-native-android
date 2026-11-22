@@ -47,7 +47,10 @@ for f in native/platform/platform.c native/runtime/*.c native/audio/mixer.c nati
         rm -f "$o"
     fi
     stale=0
-    [[ -f "$o" && "$o" -nt "$f" && "$o" -nt native/runtime/android_compat.h ]] || stale=1
+    # also rebuild when a header every native file sees changes (a stale object kept the old
+    # ALBW_VRAM_ADDR and referenced a removed symbol, which then became a tripwire stub)
+    [[ -f "$o" && "$o" -nt "$f" && "$o" -nt native/runtime/android_compat.h && "$o" -nt native/albw_native.h \
+       && "$o" -nt native/runtime/runtime.h ]] || stale=1
     if [[ "$f" == native/platform/platform.c && $stale == 0 ]]; then
         for inc in native/platform/{layout,input,menu,selector}.c native/platform/{menu_font,layout,gl,selector_img}.h native/render/render.h; do [[ "$inc" -nt "$o" ]] && stale=1; done
     fi
@@ -74,7 +77,8 @@ python3 tools/gen_data.py --addr-taken $A/addr_taken_pool.txt --code "$CODE_BIN"
 sed -E -e 's/,@(nobits|progbits)/,%\1/' -e 's/^(\s*\.section\s+[^,]+),"a"/\1,"aw"/' \
     $A/data/gamedata_gen.s > $A/data/gamedata.s
 # 3DS VRAM addresses in the literal pools (VRAM-A/B starts and ends, read by Ghidra-derived code as
-# DAT_ words) -> the host VRAM block albw_vram (native/sdk/gfx.c; README: Android boot stop A4).
+# DAT_ words) -> Android's VRAM at ALBW_ANDROID_VRAM = 0x3E000000 (native/albw_native.h, sdk/gfx.c;
+# README: Android boot stops A4, A6).
 # Only these exact values, only in pool sections (0x1F000023 etc. are IPC headers, not addresses).
 python3 - $A/data/gamedata.s <<'PY'
 import re, sys
@@ -86,10 +90,10 @@ for line in open(p):
     if m: sec = m.group(1)
     m = re.match(r"(\s*\.long )0x([0-9A-Fa-f]{8})\s*$", line)
     if m and sec == ".rodata.albw_pool" and int(m.group(2), 16) in VR:
-        line = "%salbw_vram + 0x%X\n" % (m.group(1), int(m.group(2), 16) - 0x1F000000); n += 1
+        line = "%s0x%08X\n" % (m.group(1), int(m.group(2), 16) - 0x1F000000 + 0x3E000000); n += 1
     out.append(line)
 open(p, "w").writelines(out)
-print("link_android: %d VRAM pool words -> albw_vram" % n)
+print("link_android: %d VRAM pool words -> 0x3E000000 + offset" % n)
 PY
 clang $TARGET -c $A/data/gamedata.s -o $A/data/gamedata.o
 python3 -c "import json;print('\n'.join(json.load(open('$D/report.json'))['objects']))" > $A/objs.txt

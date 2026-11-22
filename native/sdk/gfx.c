@@ -120,6 +120,9 @@ enum { PICA_RGBA8 = 0, PICA_RGB8 = 1, PICA_RGB565 = 2, PICA_RGB5A1 = 3, PICA_RGB
 
 /* VRAM: 3DS virtual layout 0x1F000000..0x1F5FFFFF, VRAM-A = first half, VRAM-B = second half */
 #define VRAM_3DS_BASE 0x1F000000u
+#ifndef ALBW_ANDROID_VRAM
+#define ALBW_ANDROID_VRAM 0x3E000000u   /* Android VRAM address: same value as native/albw_native.h */
+#endif
 #define VRAM_SIZE     0x600000u
 #define VRAM_HALF     0x300000u
 
@@ -278,32 +281,31 @@ static uint8_t *g_vram;              /* VRAM_SIZE bytes */
 static uint64_t g_t0;
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 
-#if defined(__ANDROID__)
-/* Android: 0x1F000000 lies inside ART's Java heap (README: Android memory map), so VRAM is this
- * block in libmain.so; the game's few hard-coded 3DS VRAM addresses are mapped onto it at build
- * time (ALBW_VRAM_ADDR in albw_native.h, VRAM pool words in tools/link_android.sh) */
-__attribute__((aligned(0x100000))) uint8_t albw_vram[VRAM_SIZE];
-#endif
 
 static void init_once(void) {
     g_trace = getenv("ALBW_GFX_TRACE") != NULL;
     g_t0 = now_ns();
 #if defined(__ANDROID__)
-    g_vram = albw_vram;
-    gfx_log("VRAM %p..%p (in libmain.so)", (void *)g_vram, (void *)(g_vram + VRAM_SIZE - 1));
-    return;
-#endif
+    /* Android: 0x1F000000 is inside ART's Java heap; VRAM goes to ALBW_ANDROID_VRAM (0x3E000000), where
+     * the game's hard-coded VRAM addresses are remapped at build time (ALBW_VRAM_ADDR in albw_native.h,
+     * VRAM pool words in tools/link_android.sh). Below 0x80000000: signed address arithmetic (stop A6) */
+    void *want = (void *)(uintptr_t)ALBW_ANDROID_VRAM;
+#else
     /* VRAM at its 3DS address if free (see header), else anywhere low */
     void *want = (void *)(uintptr_t)VRAM_3DS_BASE;
+#endif
     void *p = mmap(want, VRAM_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
                    -1, 0);
     if (p != MAP_FAILED && p != want) {
         munmap(p, VRAM_SIZE); /* old kernel treated NOREPLACE as a hint */
         p = MAP_FAILED;
     }
+#if defined(__ANDROID__)
+    if (p == MAP_FAILED) runtime_fatal("gfx: cannot map VRAM at %p (taken in this process?)", want);
+#endif
     g_vram = p != MAP_FAILED ? p : low_map(VRAM_SIZE);
     gfx_log("VRAM %p..%p%s", (void *)g_vram, (void *)(g_vram + VRAM_SIZE - 1),
-            g_vram == want ? " (3DS address)" : " (relocated: game VRAM range checks will miss)");
+            g_vram == want ? (want == (void *)(uintptr_t)VRAM_3DS_BASE ? " (3DS address)" : " (fixed Android address)") : " (relocated: game VRAM range checks will miss)");
 }
 static void ensure_init(void) { pthread_once(&g_once, init_once); }
 

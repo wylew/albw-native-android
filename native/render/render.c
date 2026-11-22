@@ -869,8 +869,8 @@ int render_transfer(const void *src, int sw, int sh, int sfmt, void *dst, int dw
                 extern long g_plat_frames __attribute__((weak));
                 if (!last_dst[k]) { last_dst[k] = (uintptr_t)dst; last_n[k] = g_render_draws; }
                 static unsigned long last_any;
-                fprintf(stderr, "pass: f=%ld copy %p+%d rows -> display %p %dx%d draws %lu since-any %lu\n", &g_plat_frames ? g_plat_frames : 0L,
-                        (void *)a, off_rows, dst, dw, dh, g_render_draws - last_n[k], g_render_draws - last_any);
+                fprintf(stderr, "pass: f=%ld copy %p+%d rows -> display %p %dx%d draws %lu since-any %lu vp %d,%d,%d,%d\n", &g_plat_frames ? g_plat_frames : 0L,
+                        (void *)a, off_rows, dst, dw, dh, g_render_draws - last_n[k], g_render_draws - last_any, R.vp[0], R.vp[1], R.vp[2], R.vp[3]);
                 last_n[k] = g_render_draws;
                 last_any = g_render_draws;
             }
