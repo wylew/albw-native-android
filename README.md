@@ -183,8 +183,8 @@ boots as far as the title-screen logic. It also depends on `MAP_32BIT` and a non
 | # | Step | Done when | State |
 |---|---|---|---|
 | 0 | Plan | this section | **done** 2026-11-22 |
-| 1 | Toolchain: install the NDK (r27+) and set up a CMake/Gradle project under `android/` with SDL3's Android template (`SDLActivity`). Gradle comes from the wrapper; Android Studio's bundled JDK works | an empty SDL3 app (clears the screen, reads the gamepad) installs with `./gradlew installDebug` and runs on the RP5 | todo |
-| 2 | Memory map: log `/proc/self/maps` from the step-1 app (32-bit) at `SDL_main` time and check whether the fixed ranges above are free | table of free / taken ranges added here | todo |
+| 1 | Toolchain: install the NDK (r27+) and set up a CMake/Gradle project under `android/` with SDL3's Android template (`SDLActivity`). Gradle comes from the wrapper; Android Studio's bundled JDK works | an empty SDL3 app (clears the screen, reads the gamepad) installs with `./gradlew installDebug` and runs on the RP5 | **mostly done** 2026-11-22: `android/` (AGP 9.1.1, Gradle 9.3.1, NDK r30 30.0.16248370, CMake 4.1.2, SDL 3.4.20, `armeabi-v7a`). The app runs on the RP5 with a GLES 3.2 context, and the gamepad is detected ("Retroid Pocket Controller"). Button presses not checked yet. The window reports 1920x972 (system bars still shown: fix in step 8) |
+| 2 | Memory map: log `/proc/self/maps` from the step-1 app (32-bit) at `SDL_main` time and check whether the fixed ranges above are free | table of free / taken ranges added here | **done** 2026-11-22, see [Memory map](#memory-map-32-bit-app-process-rp5) |
 | 3 | ARM32 decomp build: add `--arch arm32` to `tools/build_decomp.py` (target `armv7a-linux-androideabi24`, NDK clang). Compile all of `build/decomp` for ARM and count failures against the i386 baseline (26,001 compiled / 270 failed) | failure count at or near the baseline | todo |
 | 4 | ARM32 link: `tools/link_android.sh`, mirroring `link.sh`. Port `thunks.s` / `boolret.s` to ARM (on ARM `this` and the return value share r0, so returns-this thunks may be trivial), drop the x87 parts, port the inline asm. Output: either (a) a shared library `libalbw.so` (game data relocated by the dynamic linker; save states go through `runtime/ss_convert.c`), or (b) a non-PIE image at the fixed addresses, loaded by a small loader like `windows/loader.c`. Try (a) first and fall back to (b) if step 2 shows clashes that matter | links with 0 unresolved symbols besides the known tripwire stubs | todo |
 | 5 | Headless boot on the device: push the binary + ROM via adb, run with `SDL_VIDEO_DRIVER=offscreen` (or with the GL draw path off) and reach the title-screen logic (`TaskFileSelect` 0029B698 called every frame, as in `native/BOOT_LOG64.md`) | title logic runs 60 s without a fatal | todo |
@@ -193,6 +193,35 @@ boots as far as the title-screen logic. It also depends on `MAP_32BIT` and a non
 | 8 | Controls and layout: RP5 buttons through the SDL gamepad API; landscape layout (top screen large, bottom screen beside it, or single-screen mode by default); touch input for the bottom screen; a button combo for the Esc menu | playable start to Eastern Palace on the RP5 | todo |
 | 9 | Packaging: `android/build_apk.sh` (ROM path argument, like `build.sh`), release-signed local APK, docs in the Play section | one command makes an installable APK | todo |
 | 10 | arm64-v8a (see Approach) | runs on a 64-bit-only device | todo |
+
+### Memory map (32-bit app process, RP5)
+
+From the smoke test's `/proc/self/maps`, with SDL loaded and before GL starts:
+
+| Range the PC build uses | What | On Android |
+|---|---|---|
+| 0x08048000- | program image | free (ignored if the game is a `.so`) |
+| 0x1F000000-0x1F600000 | VRAM | **taken**: ART's Java heap (`dalvik-main space`, 0x12C00000-0x32C00000, 512 MiB, at a fixed address) |
+| 0x30000000-0x30300000 | game data | **taken**: same ART heap |
+| 0x40000000-0x5C000000 | game memory | free |
+
+Free gaps of 64 MiB or more: 0x00010000-0x07714000 (119 MiB), 0x07719000-0x12C00000 (180 MiB),
+**0x32C00000-0x7049C000 (984 MiB)**, 0x74AC0000-0xC375C000 (1,260 MiB), 0xF21B9000-0xFF09F000
+(206 MiB). For step 4: move VRAM and game data into 0x32C00000-0x3FFFFFFF on Android (for example
+game data at 0x3C000000, VRAM at 0x3E000000) and keep the heaps at 0x40000000. Save states from the
+PC go through `runtime/ss_convert.c`. Reserve the ranges as early as possible (in `JNI_OnLoad`).
+
+### Build and run the Android app
+
+```
+android/fetch_deps.sh                       # SDL sources into build/deps/SDL
+echo "sdk.dir=$HOME/Android/Sdk" > android/local.properties
+cd android && ./gradlew installDebug        # needs JDK 17+ (Android Studio's bundled JBR works)
+adb shell am start -n org.albw.port/.AlbwActivity
+adb logcat -s albw:* SDL:* SDL/APP:*
+```
+SDK packages: `sdkmanager "ndk;30.0.16248370" "cmake;4.1.2" "platforms;android-35"`. With the
+screen locked, the app stops right after it starts. Unlock the device first.
 
 ### Working on it from another machine
 
@@ -206,6 +235,7 @@ then commit.
 | Date | What |
 |---|---|
 | 2026-11-22 | Plan written. Checked: the RP5 lists `arm64-v8a,armeabi-v7a,armeabi`, Android 13 (API 33). On the dev machine the SDK has build-tools 35/36 and platforms 36/37 but no NDK. No Android code in the repo yet |
+| 2026-11-22 | Step 1: installed cmdline-tools, NDK r30, CMake 4.1.2. `android/` Gradle project + SDL3 smoke test (`android/app/src/main/cpp/smoke.c`) runs on the RP5: Adreno 650, OpenGL ES 3.2, GLSL ES 3.20. Extensions useful for step 6: `GL_EXT_shader_framebuffer_fetch` (logic ops in the shader), `GL_EXT_texture_border_clamp`, `GL_EXT_clip_control`, `GL_EXT_texture_format_BGRA8888`. Step 2: ART's heap covers the VRAM and game-data addresses (table above) |
 
 ## Status
 
