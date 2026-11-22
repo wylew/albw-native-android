@@ -40,7 +40,14 @@ def _find(name):
     sys.exit("gen_stubs: %s not found in %s (32-bit library missing?)" % (name, ", ".join(_DIRS)))
 
 
-SYSTEM_LIBS = [_find(n) for n in ("libc.so.6", "libm.so.6", "libSDL3.so.0", "libz.so.1")]  # libz: save states
+if os.environ.get("ALBW_ARCH") == "android-arm":
+    # tools/build_android.sh: the NDK sysroot's libc / libm / libz / libdl / liblog and our libSDL3.so
+    SYSTEM_LIBS = [p for p in os.environ.get("ALBW_SYSLIBS", "").split(":") if p]
+    for _p in SYSTEM_LIBS:
+        if not os.path.exists(_p):
+            sys.exit("gen_stubs: %s not found (ALBW_SYSLIBS)" % _p)
+else:
+    SYSTEM_LIBS = [_find(n) for n in ("libc.so.6", "libm.so.6", "libSDL3.so.0", "libz.so.1")]  # libz: save states
 
 
 def system_symbols():

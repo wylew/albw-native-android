@@ -57,6 +57,14 @@ void layout_defaults(LayoutConfig *c) {
     c->custom[0] = (LayoutRect){0.0f, 0.0f, 1.0f, 0.5f};
     c->custom[1] = (LayoutRect){0.1f, 0.5f, 0.8f, 0.5f};
     c->custom_visible[0] = c->custom_visible[1] = 1;
+#ifdef __ANDROID__
+    /* Android handhelds and phones: one full-screen view (Start / Tab shows the bottom screen),
+     * 16:9 top screen to fill the panel, and a sharper internal resolution (720 lines) */
+    c->separate = 0;
+    c->single_screen = 1;
+    c->widescreen = 1;
+    c->render_scale = 3;
+#endif
 }
 
 static float clamp_ratio(float r) { return r < 1.5f ? 1.5f : r > 6.0f ? 6.0f : r; }

@@ -37,7 +37,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(__i386__) || defined(__x86_64__)
 #include <xmmintrin.h>
+#endif
 
 /* the 3DS game threads' VFP mode (FPSCR 0x03000000) on the host SSE unit: FTZ | DAZ */
 /* FTZ only (bit 15): results that would be denormal become 0, as with the 3DS FZ mode. NOT DAZ
@@ -46,7 +48,17 @@
  * `!= 0.0`, where the ARM code tests the integer register; under DAZ those small bit patterns read
  * as 0 (wall merge never left its search loop, BOOT_LOG 149). FTZ already keeps real arithmetic
  * from producing denormals, so DAZ only ever changed such non-float bit patterns. */
+#if defined(__arm__)
+/* ARM (Android armeabi-v7a): the 3DS's own FPSCR mode, as 00106314 sets it: FZ | DN (0x03000000) */
+void albw_fp_set_3ds_mode(void) {
+    uint32_t f;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(f));
+    f |= 0x03000000u;
+    __asm__ volatile("vmsr fpscr, %0" : : "r"(f));
+}
+#else
 void albw_fp_set_3ds_mode(void) { _mm_setcsr((_mm_getcsr() & ~0x0040u) | 0x8000u); }
+#endif
 
 #include "../runtime/runtime.h"
 #include "../include/gptr.h" /* ALBW_GP: game pointer words (x86-64 low-4GB build) */

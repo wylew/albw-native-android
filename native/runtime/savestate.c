@@ -549,11 +549,16 @@ void albw_ss_fp_tail_work(void) {
     albw_os_ss_release_all();
     host_hold(0);
 }
+#if defined(__arm__)
+/* old x86 states only (see above): never reached on ARM */
+void albw_ss_fp_tail(void) { runtime_fatal("savestate: x86 frame tail reached on ARM"); }
+#else
 __asm__(".text\n.globl albw_ss_fp_tail\n.type albw_ss_fp_tail, @function\nalbw_ss_fp_tail:\n"
         "    call albw_ss_fp_tail_work\n"
         "    addl g_ss_fp_tail_frame, %esp\n"
         "    popl %esi\n    popl %edi\n    popl %ebx\n    popl %ebp\n    ret\n"
         ".size albw_ss_fp_tail, .-albw_ss_fp_tail\n");
+#endif
 
 void albw_ss_request(int op, int slot) {
     if (slot < 0 || slot >= SS_SLOTS) return;

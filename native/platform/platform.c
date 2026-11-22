@@ -297,6 +297,9 @@ int plat_init(const char *title, const PlatConfig *c) {
     const char *xdg_desk = getenv("XDG_CURRENT_DESKTOP");
     g_gamescope = getenv("GAMESCOPE_WAYLAND_DISPLAY") || (xdg_desk && strstr(xdg_desk, "gamescope")) ||
                   (getenv("SteamDeck") && getenv("SteamGamepadUI"));
+#ifdef __ANDROID__
+    g_gamescope = 1;   /* Android: one full-screen window, like Game Mode (menu: L3+R3, or Back) */
+#endif
     if (g_gamescope && !have_layout_cfg) g_layout_cfg.preset = LAYOUT_LARGE_TOP;
     {   /* internal resolution: ALBW_RENDER_SCALE, else --render-scale, else layout.cfg render_scale */
         const char *rs = getenv("ALBW_RENDER_SCALE");

@@ -37,6 +37,8 @@ static void on_prof(int sig, siginfo_t *si, void *ctx) {
     ucontext_t *uc = ctx;
 #if defined(__x86_64__)
     uintptr_t pc = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+#elif defined(__arm__)
+    uintptr_t pc = (uintptr_t)uc->uc_mcontext.arm_pc;
 #else
     uintptr_t pc = (uintptr_t)uc->uc_mcontext.gregs[REG_EIP];
 #endif

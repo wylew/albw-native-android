@@ -44,14 +44,33 @@ __asm__(
     "  movq 48(%rdi), %rsp\n  jmp *56(%rdi)\n"
     ".globl albw_ctx_run_on\n.type albw_ctx_run_on,@function\nalbw_ctx_run_on:\n"
     "  movq %rdi, %rsp\n  andq $-16, %rsp\n  movq %rdx, %rdi\n  call *%rsi\n  ud2\n");
+#elif defined(__arm__)
+/* ARM (A32, AAPCS): r4-r11, sp, lr, then the VFP callee-saved d8-d15. A call does not move sp on
+ * ARM, so the saved sp is the caller's. */
+__asm__(
+    ".text\n.syntax unified\n.arm\n"
+    ".globl albw_ctx_save\n.type albw_ctx_save,%function\n.p2align 2\nalbw_ctx_save:\n"
+    "  mov r12, sp\n  stmia r0!, {r4-r11, r12, lr}\n  vstmia r0, {d8-d15}\n"
+    "  mov r0, #0\n  bx lr\n"
+    ".globl albw_ctx_jump\n.type albw_ctx_jump,%function\n.p2align 2\nalbw_ctx_jump:\n"
+    "  add r2, r0, #40\n  vldmia r2, {d8-d15}\n  ldmia r0, {r4-r11, r12, lr}\n"
+    "  mov sp, r12\n  mov r0, r1\n  bx lr\n"
+    ".globl albw_ctx_run_on\n.type albw_ctx_run_on,%function\n.p2align 2\nalbw_ctx_run_on:\n"
+    "  bic r0, r0, #7\n  mov sp, r0\n  mov r0, r2\n  blx r1\n  udf #0\n");
 #else
-#error "save-state contexts: i386 / x86-64 only"
+#error "save-state contexts: i386 / x86-64 / ARM only"
 #endif
+#if defined(__arm__)
+__asm__(".section .note.GNU-stack,\"\",%progbits\n.text\n");
+#else
 __asm__(".section .note.GNU-stack,\"\",@progbits\n.text\n");
+#endif
 
 uintptr_t albw_ctx_sp(const AlbwCtx *c) {
 #if defined(__i386__)
     return c->r[4];
+#elif defined(__arm__)
+    return c->r[8];
 #else
     return c->r[6];
 #endif
@@ -64,6 +83,9 @@ uintptr_t albw_canary_get(void) {
     uintptr_t v;
 #if defined(__i386__)
     __asm__ volatile("movl %%gs:0x14, %0" : "=r"(v));
+#elif defined(__arm__)
+    extern uintptr_t __stack_chk_guard;   /* 32-bit ARM bionic: one process-wide canary */
+    v = __stack_chk_guard;
 #else
     __asm__ volatile("movq %%fs:0x28, %0" : "=r"(v));
 #endif
@@ -72,6 +94,9 @@ uintptr_t albw_canary_get(void) {
 void albw_canary_set(uintptr_t v) {
 #if defined(__i386__)
     __asm__ volatile("movl %0, %%gs:0x14" : : "r"(v) : "memory");
+#elif defined(__arm__)
+    extern uintptr_t __stack_chk_guard;
+    __stack_chk_guard = v;
 #else
     __asm__ volatile("movq %0, %%fs:0x28" : : "r"(v) : "memory");
 #endif

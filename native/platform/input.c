@@ -250,7 +250,11 @@ void input_defaults(InputConfig *c) {
         [IN_START] = "Return", [IN_SELECT] = "Right Shift, Backspace",
         [IN_DUP] = "I", [IN_DDOWN] = "K", [IN_DLEFT] = "J", [IN_DRIGHT] = "L",
         [IN_CPAD_UP] = "Up", [IN_CPAD_DOWN] = "Down", [IN_CPAD_LEFT] = "Left", [IN_CPAD_RIGHT] = "Right",
+#ifdef __ANDROID__
+        [IN_MENU] = "F1", [IN_QUIT] = "Escape, AC Back", [IN_SCREEN] = "Tab",   /* Back: the Esc menu */
+#else
         [IN_MENU] = "F1", [IN_QUIT] = "Escape", [IN_SCREEN] = "Tab",
+#endif
     };
     static const char *const PAD[IN_ACTION_COUNT] = {
         [IN_A] = "auto", [IN_B] = "auto", [IN_X] = "auto", [IN_Y] = "auto",

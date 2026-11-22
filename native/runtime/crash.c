@@ -76,6 +76,8 @@ static void report(int fd, int sig, siginfo_t *si, void *uc_v) {
     if (uc_v) pc = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.gregs[REG_EIP];
 #elif defined(__x86_64__)
     if (uc_v) pc = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.gregs[REG_RIP];
+#elif defined(__arm__)
+    if (uc_v) pc = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.arm_pc;
 #endif
     put(fd, "  pc ");
     put_hex(fd, pc);
@@ -91,6 +93,8 @@ static void report(int fd, int sig, siginfo_t *si, void *uc_v) {
         if (uc_v) sp = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.gregs[REG_ESP];
 #elif defined(__x86_64__)
         if (uc_v) sp = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.gregs[REG_RSP];
+#elif defined(__arm__)
+        if (uc_v) sp = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.arm_sp;
 #endif
         put(fd, "  jumped to a bad address; called from:\n  ");
         if (sp) {

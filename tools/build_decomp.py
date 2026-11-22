@@ -33,6 +33,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "build", "decomp")
 TARGET = "i686-linux-gnu"
 ARCH64 = False  # --arch x86_64 (build/decomp64): low-4GB mode, see native/64BIT.md
+# --arch android-arm (build/decomp-android, tools/build_android.sh): 32-bit ARM for Android
+# (armeabi-v7a) with the NDK's clang first in PATH. ARM code (not Thumb), position independent
+# (the game is a shared library loaded by SDLActivity), softfp (the NDK ABI: float arguments and
+# results in core registers, which also makes Ghidra's int/float prototype mismatches harmless).
+ARCH_FLAGS = ["-msse2", "-mfpmath=sse"]
 COMPAT = os.path.join(ROOT, "native", "albw_native.h")
 
 # ------------------------------------------------------------------ rewrites
@@ -772,7 +777,7 @@ def build_one(job):
            "-ferror-limit=3", "-include", COMPAT,
            # float model = the 3DS VFP (native/gameplay/AUDIT.md): single precision in SSE
            # registers on i686 too (no x87 excess precision), no FMA contraction (vmla is unfused)
-           "-msse2", "-mfpmath=sse", "-ffp-contract=off",
+           *ARCH_FLAGS, "-ffp-contract=off",
            "-I", os.path.join(OUT, "shared", "include"), "-I", os.path.dirname(src)]
     if ARCH64:
         cmd += ["-fms-extensions", "-Wno-error=int-to-pointer-cast"]  # __ptr32 (ALBW_GP)
@@ -1025,13 +1030,18 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--snapshot", default="",
                     help="build from a source snapshot (tools/export_snapshot.py: decomp/), no Ghidra dump or decomp repo")
-    ap.add_argument("--arch", choices=("x86", "x86_64"), default="x86",
+    ap.add_argument("--arch", choices=("x86", "x86_64", "android-arm"), default="x86",
                     help="x86 = 32-bit intermediate build; x86_64 = the release target (tracks 64-bit health)")
     a = ap.parse_args()
-    global OUT, TARGET, CTORS, ARCH64
+    global OUT, TARGET, CTORS, ARCH64, ARCH_FLAGS
     if a.arch == "x86_64":
         OUT, TARGET, ARCH64 = os.path.join(ROOT, "build", "decomp64"), "x86_64-linux-gnu", True
         os.environ["ALBW_ARCH"] = "x86_64"  # gen_stubs.system_symbols(): 64-bit libraries
+    elif a.arch == "android-arm":
+        OUT = os.path.join(ROOT, "build", "decomp-android")
+        TARGET = os.environ.get("ALBW_ANDROID_TARGET", "armv7a-linux-androideabi24")
+        ARCH_FLAGS = ["-marm", "-fPIC", "-mfloat-abi=softfp", "-mfpu=neon"]
+        os.environ["ALBW_ARCH"] = "android-arm"
     if a.snapshot:
         return snapshot_main(a)
     decomp = os.path.abspath(a.decomp)

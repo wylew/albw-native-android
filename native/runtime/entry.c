@@ -11,6 +11,10 @@
 #include <unistd.h>
 #include "../platform/platform.h"
 #include "runtime.h"
+#ifdef __ANDROID__
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>   /* main() becomes SDL_main, called by SDLActivity (android/) */
+#endif
 
 typedef void (*InitFn)(void);
 extern const InitFn albw_ctors[];
@@ -83,8 +87,41 @@ static void albw_portable_dirs(void) {
     fprintf(stderr, "portable: saves, settings and logs in %s\n", base);
 }
 
+#ifdef __ANDROID__
+/* Android: everything lives in the app's own folder on shared storage,
+ *   /storage/emulated/0/Android/data/<package>/files   (visible to file managers and adb):
+ *   rom.3ds     the ROM (copied there by the app's ROM picker, android/, or put there by hand)
+ *   share/ config/ state/   saves, settings (layout.cfg, input.cfg), save states (portable mode)
+ *   albw.log    stderr of the last run
+ * Set before albw_portable_dirs, which turns ALBW_DATA_DIR into the XDG paths. */
+static void albw_android_dirs(void) {
+    const char *base = SDL_GetAndroidExternalStoragePath();
+    if (!base || !*base) base = SDL_GetAndroidInternalStoragePath();
+    if (!base || !*base) return;
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");   /* Back opens the Esc menu (input.c) */
+    static char log[4200], rom[4200];
+    snprintf(log, sizeof log, "%s/albw.log", base);
+    if (freopen(log, "w", stderr)) setvbuf(stderr, NULL, _IOLBF, 0);
+    setenv("HOME", base, 1);
+    setenv("ALBW_DATA_DIR", base, 0);
+    snprintf(rom, sizeof rom, "%s/rom.3ds", base);
+    if (!getenv("ALBW_ROM")) setenv("ALBW_ROM", rom, 1);
+    struct stat st;
+    if (stat(getenv("ALBW_ROM"), &st) != 0) {
+        char msg[4600];
+        snprintf(msg, sizeof msg, "No ROM found at\n%s\n\nUse \"Choose ROM\" in the app, or copy your decrypted "
+                 "European .3ds there and name it rom.3ds.", getenv("ALBW_ROM"));
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "A Link Between Worlds", msg, NULL);
+        exit(1);
+    }
+}
+#endif
+
 int main(int argc, char **argv) {
     albw_argv = argv;
+#ifdef __ANDROID__
+    albw_android_dirs();
+#endif
     albw_portable_dirs();
     /* x86-64 low-4GB mode: the game runs on a low stack (game code keeps stack addresses in
      * 32-bit words), same thread; on i386 game_main is called directly (runtime/lowmem.c) */
