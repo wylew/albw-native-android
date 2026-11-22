@@ -1666,7 +1666,11 @@ static int slot_thread_create(pthread_t *pt, void *(*fn)(void *), void *arg, int
         if (g_slots[k].used && g_slots[k].joinable) {   /* finished: free once its thread is gone */
             bool done = false;
             for (SsThr *t = g_ss_thr; t; t = t->next) if (t->slot == k) { done = t->finished; break; }   /* newest first */
+#ifdef __ANDROID__   /* bionic has no pthread_tryjoin_np; the thread has finished its work, join waits for its exit */
+            if (done && pthread_join(g_slots[k].pt, NULL) == 0) g_slots[k].used = false;
+#else
             if (done && pthread_tryjoin_np(g_slots[k].pt, NULL) == 0) g_slots[k].used = false;
+#endif
         }
         if (!g_slots[k].used) slot = k;
     }
