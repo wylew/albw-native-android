@@ -539,6 +539,26 @@ static uint64_t g_light_digest;
 static unsigned g_light_draws;
 static long g_dump_frame = -1, g_dump_last = -1;   /* ALBW_RENDER_DUMP=<frame>[-<last>] (see dumping()) */
 
+#if defined(__ANDROID__)
+static void (*g_depth_rangef)(GLfloat, GLfloat);
+static void standin_DepthRange(double n, double f) {
+    if (!g_depth_rangef) g_depth_rangef = (void (*)(GLfloat, GLfloat))SDL_GL_GetProcAddress("glDepthRangef");
+    if (g_depth_rangef) g_depth_rangef((GLfloat)n, (GLfloat)f);
+}
+static void standin_LogicOp(GLenum op) {
+    static int warned;
+    if (!warned++) rlog("GL: glLogicOp(0x%x) not available on GLES: ignored (README: Android step 6)", op);
+}
+/* single-output fragment shaders get location 0 anyway */
+static void standin_BindFragDataLocation(GLuint p, GLuint c, const GLchar *n) { (void)p; (void)c; (void)n; }
+static void *gles_standin(const char *name) {
+    if (!strcmp(name, "glDepthRange")) return (void *)standin_DepthRange;
+    if (!strcmp(name, "glLogicOp")) return (void *)standin_LogicOp;
+    if (!strcmp(name, "glBindFragDataLocation")) return (void *)standin_BindFragDataLocation;
+    return NULL;
+}
+#endif
+
 int render_ready(void) {
     if (R.ready) return 1;
     if (R.failed || !SDL_GL_GetCurrentContext()) return 0;
@@ -546,9 +566,17 @@ int render_ready(void) {
     if (R.ready) { unlock(); return 1; }
     g_trace = getenv("ALBW_RENDER_TRACE") != NULL;
     int missing = 0;
+#if defined(__ANDROID__)
+    /* GLES 3.2 lacks these desktop functions: stand-ins (logic ops: README step 6) */
+#define RGL_LOAD(ret, name, args) \
+    rgl##name = (ret(*) args)SDL_GL_GetProcAddress("gl" #name); \
+    if (!rgl##name) rgl##name = (ret(*) args)gles_standin("gl" #name); \
+    if (!rgl##name) { rlog("GL: missing gl%s", #name); missing++; }
+#else
 #define RGL_LOAD(ret, name, args) \
     rgl##name = (ret(*) args)SDL_GL_GetProcAddress("gl" #name); \
     if (!rgl##name) { rlog("GL: missing gl%s", #name); missing++; }
+#endif
     RGL_FUNCS(RGL_LOAD)
 #undef RGL_LOAD
     if (missing) {

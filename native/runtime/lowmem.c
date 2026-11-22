@@ -72,12 +72,14 @@ static int (*g_low_fn)(void *);
 static void *g_low_arg;
 static int g_low_result;
 #if defined(__ANDROID__)
-/* bionic has no getcontext / makecontext / swapcontext: the save-state contexts (ss_ctx.c) do it */
-static AlbwCtx g_ret_actx;
-static void low_trampoline_ctx(void *unused) {
+/* Android: a thread whose stack is the fixed slot, not a stack switch on the SDL thread. ART checks
+ * the stack pointer of every JNI call (SDL calls into Java) against the thread's known stack bounds
+ * and throws StackOverflowError on a foreign stack; a new thread gets its bounds from its own
+ * attributes when SDL attaches it to the VM. The SDL thread waits for it. */
+static void *low_thread(void *unused) {
     (void)unused;
     g_low_result = g_low_fn(g_low_arg);
-    albw_ctx_jump(&g_ret_actx, 1);
+    return NULL;
 }
 #else
 static ucontext_t g_ret_ctx, g_low_ctx;
@@ -92,8 +94,15 @@ int albw_run_on_low_stack(int (*fn)(void *), void *arg, size_t stack_size) {
     g_low_fn = fn;
     g_low_arg = arg;
 #if defined(__ANDROID__)
-    (void)stack_size;
-    if (albw_ctx_save(&g_ret_actx) == 0) albw_ctx_run_on(top, low_trampoline_ctx, NULL);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstack(&attr, lo, stack_size);
+    pthread_t t;
+    int r = pthread_create(&t, &attr, low_thread, NULL);
+    pthread_attr_destroy(&attr);
+    if (r) runtime_fatal("main stack: cannot start the game thread (%d)", r);
+    pthread_setname_np(t, "albw-game");
+    pthread_join(t, NULL);
     return g_low_result;
 #else
     getcontext(&g_low_ctx);

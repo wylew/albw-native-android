@@ -108,6 +108,9 @@ int SDL_main(int argc, char **argv) {
     char rom[1024];
     snprintf(rom, sizeof rom, "%s/rom.3ds", ext);
     setenv("ALBW_ROM", rom, 0);
+    /* crashes: Android's debuggerd writes a full tombstone (adb logcat -b crash); the port's own
+     * handler cannot unwind past the signal frame on ARM and re-entered itself */
+    setenv("ALBW_CRASH_HANDLER", "0", 0);
     fprintf(stderr, "android: data folder %s, ROM %s%s\n", ext, getenv("ALBW_ROM"),
             access(getenv("ALBW_ROM"), R_OK) ? " (MISSING: adb push your EU ROM there)" : "");
     return main(argc, argv);

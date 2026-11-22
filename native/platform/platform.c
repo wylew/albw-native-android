@@ -74,9 +74,42 @@ void gl_enable_debug(void *(*get_proc)(const char *)) {
     fprintf(stderr, "GL: debug output enabled\n");
 }
 
+#if defined(__ANDROID__)
+/* GLES 3.2 (README: Android port, step 6): "#version 330 core" -> "#version 320 es" plus default
+ * precisions (fragment shaders have none for float / int / most sampler types), placed after the
+ * leading preprocessor lines (#extension must come before any code). Returns malloc'd text. */
+static char *gles_source(const char *src) {
+    static const char prec[] =
+        "precision highp float;\nprecision highp int;\nprecision highp sampler2D;\n"
+        "precision highp sampler3D;\nprecision highp samplerCube;\nprecision highp sampler2DArray;\n"
+        "precision highp sampler2DShadow;\nprecision highp isampler2D;\nprecision highp usampler2D;\n"
+        "precision highp samplerBuffer;\nprecision highp isamplerBuffer;\nprecision highp usamplerBuffer;\n";
+    const char *body = src;
+    if (!strncmp(body, "#version 330 core", 17)) body += 17;
+    else if (!strncmp(body, "#version", 8)) body = strchr(body, '\n') ? strchr(body, '\n') : body + strlen(body);
+    while (*body == '\n') body++;
+    const char *code = body;   /* after the leading preprocessor lines */
+    while (*code == '#') {
+        const char *nl = strchr(code, '\n');
+        if (!nl) { code += strlen(code); break; }
+        code = nl + 1;
+    }
+    size_t n = strlen(src) + sizeof prec + 64;
+    char *out = malloc(n);
+    snprintf(out, n, "#version 320 es\n%.*s%s#line 2\n%s", (int)(code - body), body, prec, code);
+    return out;
+}
+#endif
+
 static GLuint shader(GLenum type, const char *src) {
     GLuint s = glCreateShader(type);
+#if defined(__ANDROID__)
+    char *es = gles_source(src);
+    glShaderSource(s, 1, (const char *const *)&es, NULL);
+    free(es);
+#else
     glShaderSource(s, 1, &src, NULL);
+#endif
     glCompileShader(s);
     GLint ok;
     glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
@@ -84,6 +117,9 @@ static GLuint shader(GLenum type, const char *src) {
         char log[1024];
         glGetShaderInfoLog(s, sizeof log, NULL, log);
         fprintf(stderr, "shader compile failed:\n%s\n", log);
+#if defined(__ANDROID__)
+        { char *es = gles_source(src); fprintf(stderr, "---- source (GLES) ----\n%s\n----\n", es); free(es); }
+#endif
         abort();
     }
     return s;
@@ -273,11 +309,18 @@ int plat_init(const char *title, const PlatConfig *c) {
     }
     input_init();  /* keyboard + controllers: config, mapping DB, already connected pads */
     int debug = getenv("ALBW_GL_DEBUG") != NULL;
+#if defined(__ANDROID__)
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, debug ? SDL_GL_CONTEXT_DEBUG_FLAG : 0);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG |
                                               (debug ? SDL_GL_CONTEXT_DEBUG_FLAG : 0));
+#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     /* the window needs no depth/stencil: the game renders into the screen targets */
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
@@ -331,10 +374,17 @@ int plat_init(const char *title, const PlatConfig *c) {
             fprintf(stderr, "GL: WARNING: software rasteriser (%s): expect ~20-25 fps and every core busy.\n"
                     "    On NVIDIA + Wayland the 32-bit EGL needs lib32 egl-wayland; or run with SDL_VIDEO_DRIVER=x11.\n", rnd);
     }
+#if defined(__ANDROID__)
+    if (major * 10 + minor < 32) {
+        fprintf(stderr, "OpenGL ES %d.%d is too old: 3.2 is required.\n", major, minor);
+        return -1;
+    }
+#else
     if (major * 10 + minor < 33) {
         fprintf(stderr, "OpenGL %d.%d is too old: 3.3 is required.\n", major, minor);
         return -1;
     }
+#endif
     if (debug) gl_enable_debug((void *(*)(const char *))SDL_GL_GetProcAddress);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
