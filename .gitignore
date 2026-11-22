@@ -22,3 +22,10 @@ native/robust/systemic3/prev_*/
 *.zip
 /screen_top.ppm
 /*.mp4
+# Android (build_android.sh): built libraries, SDL's copied Java classes, Gradle output
+/android/app/src/main/jniLibs/
+/android/app/src/sdl/
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties

@@ -1,0 +1,51 @@
+// The game itself is built outside Gradle by tools/build_android.sh (it needs your ROM): that script
+// puts libSDL3.so and libmain.so into src/main/jniLibs/armeabi-v7a/ and SDL's Java classes into
+// src/sdl/java/, then runs this build. Gradle only packages them with the launcher activity.
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.wylew.albw'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.wylew.albw'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '0.2.8-android1'
+        ndk {
+            abiFilters 'armeabi-v7a'   // the game is 32-bit ARM for now (native/64BIT.md)
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += 'src/sdl/java'   // copied from SDL by tools/build_android.sh
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug   // sideloading only
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true   // extract the (large) libmain.so instead of mapping it from the APK
+            keepDebugSymbols += ['**/libmain.so']   // crash reports name game functions (func_XXXXXXXX)
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}

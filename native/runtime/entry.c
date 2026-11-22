@@ -88,6 +88,12 @@ static void albw_portable_dirs(void) {
 }
 
 #ifdef __ANDROID__
+#include <pthread.h>
+static int g_android_rc;
+static void *android_game_thread(void *p) {
+    g_android_rc = game_main(p);
+    return NULL;
+}
 /* Android: everything lives in the app's own folder on shared storage,
  *   /storage/emulated/0/Android/data/<package>/files   (visible to file managers and adb):
  *   rom.3ds     the ROM (copied there by the app's ROM picker, android/, or put there by hand)
@@ -127,7 +133,21 @@ int main(int argc, char **argv) {
      * 32-bit words), same thread; on i386 game_main is called directly (runtime/lowmem.c) */
     struct MainArgs a = {argc, argv};
     pmem_init();   /* fixed-address areas before anything else maps memory (save states) */
+#ifdef __ANDROID__
+    /* Android: no stack switch on SDL's thread. ART checks the stack pointer of every thread that
+     * calls into Java (SDL does, through JNI) against that thread's own stack, so the game runs on a
+     * thread of its own with a 16 MiB stack instead (SDL attaches it to the VM when it needs to). */
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setstacksize(&at, 16u << 20);
+    pthread_t th;
+    if (pthread_create(&th, &at, android_game_thread, &a) != 0) runtime_fatal("cannot start the game thread");
+    pthread_attr_destroy(&at);
+    pthread_join(th, NULL);
+    return g_android_rc;
+#else
     return albw_run_on_low_stack(game_main, &a, 16u << 20);
+#endif
 }
 
 void albw_ss_set_main_base(uintptr_t base);   /* savestate.c */

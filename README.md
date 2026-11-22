@@ -61,6 +61,27 @@ In desktop mode, `./build.sh /path/to/game.3ds` builds inside distrobox and make
 `build/ALBW-native-x86_64.AppImage` (or copy the release AppImage over). Add it to Steam as a
 non-Steam game to play in Game Mode. L3+R3 opens the game's menu.
 
+### Android (work in progress: 32-bit ARM)
+
+This fork adds an Android build for devices that still run 32-bit apps (Retroid Pocket 5 and other
+Snapdragon 865-class handhelds). Phones with 64-bit-only CPUs (Snapdragon 8 Elite, Pixel 7 and
+newer) need the 64-bit build, which is not ready yet (native/64BIT.md).
+
+Build it on a Linux PC with the Android SDK, NDK r28 or newer and your ROM:
+
+```
+./build_android.sh /path/to/your/game.3ds        # -> build/android/albw-android.apk
+adb install -r build/android/albw-android.apk
+```
+
+On the device, open the app, **Choose ROM** (it is copied to the app's folder,
+`Android/data/io.github.wylew.albw/files/rom.3ds`), then **Play**. It starts in single-screen mode
+with a 16:9 top screen: **Start** shows the bottom screen (map, Gear, Items; touch works there),
+**Back** or **L3+R3** opens the menu. The log of the last run is `albw.log` in the same folder.
+The APK contains code built from your ROM: keep it to yourself.
+
+Not tested on hardware yet; see `android/README.md` for what is known to differ from the PC build.
+
 ### Windows (experimental)
 
 `windows/build_windows.sh`, run on Linux after a normal build, makes `build/ALBW-windows.zip`:
