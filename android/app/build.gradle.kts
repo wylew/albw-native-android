@@ -9,6 +9,10 @@ val sdlDir = File(repoRoot, "build/deps/SDL")
 if (!File(sdlDir, "CMakeLists.txt").exists()) {
     throw GradleException("SDL sources missing: run android/fetch_deps.sh first")
 }
+// The game: tools/link_android.sh -> build/android/jniLibs/<abi>/{libmain,libSDL3}.so.
+// Without it (or with -Psmoke) the step-1 smoke test is built from src/main/cpp instead.
+val gameLibs = File(repoRoot, "build/android/jniLibs")
+val useGame = File(gameLibs, "armeabi-v7a/libmain.so").exists() && !project.hasProperty("smoke")
 
 android {
     namespace = "org.albw.port"
@@ -25,17 +29,23 @@ android {
             // 32-bit ARM first (README: Android port, Approach)
             abiFilters += listOf("armeabi-v7a")
         }
-        externalNativeBuild {
-            cmake {
-                arguments += listOf("-DSDL_DIR=${sdlDir}", "-DANDROID_STL=c++_static")
+        if (!useGame) {
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DSDL_DIR=${sdlDir}", "-DANDROID_STL=c++_static")
+                }
             }
         }
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "4.1.2"
+    if (useGame) {
+        sourceSets["main"].jniLibs.directories.add(gameLibs.path)
+    } else {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "4.1.2"
+            }
         }
     }
 

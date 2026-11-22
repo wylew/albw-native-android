@@ -549,11 +549,16 @@ void albw_ss_fp_tail_work(void) {
     albw_os_ss_release_all();
     host_hold(0);
 }
+#if defined(__i386__)
 __asm__(".text\n.globl albw_ss_fp_tail\n.type albw_ss_fp_tail, @function\nalbw_ss_fp_tail:\n"
         "    call albw_ss_fp_tail_work\n"
         "    addl g_ss_fp_tail_frame, %esp\n"
         "    popl %esi\n    popl %edi\n    popl %ebx\n    popl %ebp\n    ret\n"
         ".size albw_ss_fp_tail, .-albw_ss_fp_tail\n");
+#else
+/* only the i386 states of that 2026-11-19 build need it */
+void albw_ss_fp_tail(void) { runtime_fatal("albw_ss_fp_tail: i386 save states only"); }
+#endif
 
 void albw_ss_request(int op, int slot) {
     if (slot < 0 || slot >= SS_SLOTS) return;

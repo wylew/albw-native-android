@@ -24,7 +24,11 @@ int albw_run_on_low_stack(int (*fn)(void *), void *arg, size_t stack_size);
 
 /* save states (savestate.c, ss_ctx.c; native/SAVESTATES.md) */
 #include <stdint.h>
+#if defined(__arm__)
+typedef struct { uintptr_t r[26]; } AlbwCtx;  /* r4-r11, sp, lr, d8-d15 (ss_ctx.c) */
+#else
 typedef struct { uintptr_t r[8]; } AlbwCtx;   /* callee-saved registers, sp, return address */
+#endif
 __attribute__((returns_twice)) int albw_ctx_save(AlbwCtx *c);
 __attribute__((noreturn)) void albw_ctx_jump(const AlbwCtx *c, int v);
 __attribute__((noreturn)) void albw_ctx_run_on(void *stack_top, void (*fn)(void *), void *arg);

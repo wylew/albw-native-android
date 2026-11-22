@@ -23,7 +23,14 @@ def syms(obj, *flags):
 # /lib/...), Fedora/openSUSE /usr/lib; build.sh's own SDL3 in build/deps. A library not found here had
 # its functions stubbed, and the stubs shadowed the real ones (Ubuntu: "stub SDL_Init called").
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if os.environ.get("ALBW_ARCH") == "x86_64":
+_ANDROID = os.environ.get("ALBW_ARCH") == "arm32"   # tools/link_android.sh
+if _ANDROID:
+    # ALBW_NDK_TOOLCHAIN: .../toolchains/llvm/prebuilt/linux-x86_64 (set by link_android.sh)
+    _TC = os.environ["ALBW_NDK_TOOLCHAIN"]
+    _API = os.environ.get("ALBW_ANDROID_API", "24")
+    _DIRS = [os.path.join(_TC, "sysroot", "usr", "lib", "arm-linux-androideabi", _API),
+             os.path.join(_ROOT, "build", "deps", "sdl3-android-armv7", "lib")]
+elif os.environ.get("ALBW_ARCH") == "x86_64":
     _DIRS = ["/usr/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64"]
 else:
     _DIRS = [os.path.join(_ROOT, "build", "deps", "sdl3-i686", "lib"), "/usr/lib32",
@@ -40,14 +47,24 @@ def _find(name):
     sys.exit("gen_stubs: %s not found in %s (32-bit library missing?)" % (name, ", ".join(_DIRS)))
 
 
-SYSTEM_LIBS = [_find(n) for n in ("libc.so.6", "libm.so.6", "libSDL3.so.0", "libz.so.1")]  # libz: save states
+if _ANDROID:
+    import glob
+    SYSTEM_LIBS = [_find(n) for n in ("libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
+                                      "libSDL3.so", "libz.so")]
+    SYSTEM_LIBS += [_find("crtbegin_so.o")]   # atexit, __dso_handle (linked into every .so)
+    # compiler runtime (static): __aeabi_*, __udivdi3, _Unwind_* ...
+    SYSTEM_LIBS += glob.glob(os.path.join(_TC, "lib", "clang", "*", "lib", "linux", "libclang_rt.builtins-arm-android.a"))
+    SYSTEM_LIBS += glob.glob(os.path.join(_TC, "lib", "clang", "*", "lib", "linux", "arm", "libunwind.a"))
+else:
+    SYSTEM_LIBS = [_find(n) for n in ("libc.so.6", "libm.so.6", "libSDL3.so.0", "libz.so.1")]  # libz: save states
 
 
 def system_symbols():
     """Names the system libraries provide: never stub those (a stub would shadow libc)."""
     out = set()
     for lib in SYSTEM_LIBS:
-        r = subprocess.run(["llvm-nm", "-D", "--defined-only", "--format=just-symbols", lib], capture_output=True, text=True)
+        dyn = [] if lib.endswith((".a", ".o")) else ["-D"]
+        r = subprocess.run(["llvm-nm", *dyn, "--defined-only", "--format=just-symbols", lib], capture_output=True, text=True)
         out |= {x.split("@")[0] for x in r.stdout.split()}
     return out
 

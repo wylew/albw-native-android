@@ -76,6 +76,8 @@ static void report(int fd, int sig, siginfo_t *si, void *uc_v) {
     if (uc_v) pc = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.gregs[REG_EIP];
 #elif defined(__x86_64__)
     if (uc_v) pc = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.gregs[REG_RIP];
+#elif defined(__arm__)
+    if (uc_v) pc = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.arm_pc;
 #endif
     put(fd, "  pc ");
     put_hex(fd, pc);
@@ -93,10 +95,19 @@ static void report(int fd, int sig, siginfo_t *si, void *uc_v) {
         if (uc_v) sp = (uintptr_t)((ucontext_t *)uc_v)->uc_mcontext.gregs[REG_RSP];
 #endif
         put(fd, "  jumped to a bad address; called from:\n  ");
+#if defined(__arm__)
+        /* ARM: the return address is in lr, not on the stack */
+        if (uc_v) {
+            void *ra = (void *)((ucontext_t *)uc_v)->uc_mcontext.arm_lr;
+            backtrace_symbols_fd(&ra, 1, fd);
+        }
+        (void)sp;
+#else
         if (sp) {
             void *ra = *(void **)sp;
             backtrace_symbols_fd(&ra, 1, fd);
         }
+#endif
         put(fd, "==== end of crash report\n");
         return;
     }

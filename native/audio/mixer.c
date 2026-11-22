@@ -263,11 +263,15 @@ void aud_voice_set_mono_filter(int v, bool enable, uint32_t cutoff_hz) {
         x->mono_a = (float)(c - sqrt(c * c - 1.0));
         if (!(x->mono_a >= 0.0f && x->mono_a < 1.0f))
         {
+#if defined(__i386__)
             uint16_t sw, tw; uint32_t env[7];
             __asm__ volatile("fnstenv %0" : "=m"(env)); __asm__ volatile("fldenv %0" :: "m"(env));
             sw = (uint16_t)env[1]; tw = (uint16_t)env[2];
             fprintf(stderr, "mixer: voice %d one-pole cut-off %u -> a %g (x87 status %04x top %d tags %04x)\n", v,
                     (unsigned)cutoff_hz, x->mono_a, sw, (sw >> 11) & 7, tw);
+#else
+            fprintf(stderr, "mixer: voice %d one-pole cut-off %u -> a %g\n", v, (unsigned)cutoff_hz, x->mono_a);
+#endif
         }
     }
     aud_unlock();

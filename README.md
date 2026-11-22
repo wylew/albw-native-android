@@ -186,7 +186,7 @@ boots as far as the title-screen logic. It also depends on `MAP_32BIT` and a non
 | 1 | Toolchain: install the NDK (r27+) and set up a CMake/Gradle project under `android/` with SDL3's Android template (`SDLActivity`). Gradle comes from the wrapper; Android Studio's bundled JDK works | an empty SDL3 app (clears the screen, reads the gamepad) installs with `./gradlew installDebug` and runs on the RP5 | **done** 2026-11-22: `android/` (AGP 9.1.1, Gradle 9.3.1, NDK r30 30.0.16248370, CMake 4.1.2, SDL 3.4.20, `armeabi-v7a`). The app runs on the RP5 with a GLES 3.2 context, and the gamepad is detected ("Retroid Pocket Controller"). Input checked through SDL's gamepad API: A, B, X, the D-pad, both sticks and both stick clicks. Y, L/R, L2/R2, Start and Select weren't pressed in the test, so check them in step 8. The window reports 1920x972 (system bars still shown: fix in step 8) |
 | 2 | Memory map: log `/proc/self/maps` from the step-1 app (32-bit) at `SDL_main` time and check whether the fixed ranges above are free | table of free / taken ranges added here | **done** 2026-11-22, see [Memory map](#memory-map-32-bit-app-process-rp5) |
 | 3 | ARM32 decomp build: add `--arch arm32` to `tools/build_decomp.py` (target `armv7a-linux-androideabi24`, NDK clang). Compile all of `build/decomp` for ARM and count failures against the i386 baseline (26,001 compiled / 270 failed) | failure count at or near the baseline | **done** 2026-11-22: `tools/build_decomp_arm32.sh` (= `build_decomp.py --snapshot decomp --arch arm32`, NDK clang 21, `-mfpu=neon -mfloat-abi=softfp -fPIC`) -> `build/decomp-arm32`. **26,237 / 26,237 snapshot sources compiled, 0 failed** (ELF32 ARM, 105 MB of objects). 74,822 names left unresolved, which the link fills from game data, native code and stubs |
-| 4 | ARM32 link: `tools/link_android.sh`, mirroring `link.sh`. Port `thunks.s` / `boolret.s` to ARM (on ARM `this` and the return value share r0, so returns-this thunks may be trivial), drop the x87 parts, port the inline asm. Output: either (a) a shared library `libalbw.so` (game data relocated by the dynamic linker; save states go through `runtime/ss_convert.c`), or (b) a non-PIE image at the fixed addresses, loaded by a small loader like `windows/loader.c`. Try (a) first and fall back to (b) if step 2 shows clashes that matter | links with 0 unresolved symbols besides the known tripwire stubs | todo |
+| 4 | ARM32 link: `tools/link_android.sh`, mirroring `link.sh`. Port `thunks.s` / `boolret.s` to ARM (on ARM `this` and the return value share r0, so returns-this thunks may be trivial), drop the x87 parts, port the inline asm. Output: either (a) a shared library `libalbw.so` (game data relocated by the dynamic linker; save states go through `runtime/ss_convert.c`), or (b) a non-PIE image at the fixed addresses, loaded by a small loader like `windows/loader.c`. Try (a) first and fall back to (b) if step 2 shows clashes that matter | links with 0 unresolved symbols besides the known tripwire stubs | **done** 2026-11-22: option (a). `tools/link_android.sh` -> `build/android/jniLibs/armeabi-v7a/libmain.so` (29 MB, 16 MB stripped in the APK) + `libSDL3.so`; Gradle packages them when present (`-Psmoke` builds the step-1 test instead). 11 function stubs + 20 data blocks. No text relocations, entry `SDL_main` (`native/runtime/android.c`). Open: save states (`tools/gen_ssmap.py` reads GNU ld maps, not lld's; the `.so` load address changes every run) |
 | 5 | Headless boot on the device: push the binary + ROM via adb, run with `SDL_VIDEO_DRIVER=offscreen` (or with the GL draw path off) and reach the title-screen logic (`TaskFileSelect` 0029B698 called every frame, as in `native/BOOT_LOG64.md`) | title logic runs 60 s without a fatal | todo |
 | 6 | GLES renderer: a `#version 300 es` variant of the shaders (precision qualifiers, no `core`), an SDL GLES 3.2 context, logic ops done in the shader (framebuffer fetch on Adreno, `GL_EXT_shader_framebuffer_fetch`, or a fallback), checks for every desktop-only call | title screen draws correctly on the RP5 | todo |
 | 7 | Android platform layer: ROM picked with the system file picker (SAF) and copied to app storage (for development: `adb push` to `/sdcard/Android/data/<package>/files/`); saves / states / config under `SDL_GetPrefPath`; audio through SDL (AAudio); log viewable via `adb logcat` | boots from the APK alone, saves survive a restart | todo |
@@ -238,50 +238,4 @@ then commit.
 | 2026-11-22 | Step 1: installed cmdline-tools, NDK r30, CMake 4.1.2. `android/` Gradle project + SDL3 smoke test (`android/app/src/main/cpp/smoke.c`) runs on the RP5: Adreno 650, OpenGL ES 3.2, GLSL ES 3.20. Extensions useful for step 6: `GL_EXT_shader_framebuffer_fetch` (logic ops in the shader), `GL_EXT_texture_border_clamp`, `GL_EXT_clip_control`, `GL_EXT_texture_format_BGRA8888`. Step 2: ART's heap covers the VRAM and game-data addresses (table above) |
 | 2026-11-22 | Step 1 done: gamepad events arrive in SDL (buttons, D-pad, sticks, stick clicks). Next: step 3 (ARM32 decomp build) |
 | 2026-11-22 | Step 3 done: the whole decomp snapshot compiles for armeabi-v7a with no failures. Code to port in step 4: `runtime/ss_ctx.c` (save-state contexts, i386/x86-64 asm, `#error` otherwise), `albw_ss_fp_tail` asm in `runtime/savestate.c`, PC/SP reads from `ucontext` in `runtime/crash.c` / `prof.c`, `runtime/x87guard.c` (skip on ARM), `glibc_compat.c` (i386-only already). In `link.sh`: `boolret` (i386 `%al`; ARM callees widen bools themselves, so it can likely be dropped), the returns-this `thunks.s` (rewrite for ARM: keep r0 in r4, copy the stack words, call the impl), the x87 relink (drop), `--section-start` / `-no-pie` (-> `-shared -Wl,-Bsymbolic`). Bionic: `backtrace()` needs API 33 (the RP5 has it; minSdk is 24, so add an `_Unwind_Backtrace` shim), no `execv("/proc/self/exe")` restart in an app |
-
-## Status
-
-Working: boot, title, file select, saving and loading; the story's first areas, the overworld,
-houses, items, enemies, combat; the Eastern Palace and its boss (Yuga, wall merging as a
-painting); late-game saves load (Death Mountain, Lorule).
-
-Known problems: the Fire / Tornado Rod flame cones are not drawn yet; some effects and cutscenes
-are still wrong; most dungeons after the Eastern Palace are untested. Full list:
-[MISSING.md](MISSING.md). Please report what you find.
-
-## How it works (short)
-
-- `decomp/` – the decompiled game code, converted so it compiles natively.
-- `native/` – written by hand: window, input, audio, the renderer, replacements for the 3DS system
-  libraries, and fixes for decompiled functions (`native/compilefix/`, each with a note).
-- `windows/` – the Windows loader.
-- The game's data is read from your ROM at build time and never stored in the repository.
-
-Notes: [native/BOOT_LOG.md](native/BOOT_LOG.md) (every bug and its fix),
-[native/PAINTING.md](native/PAINTING.md) (wall merging step by step),
-[native/DIDNT_WORK.md](native/DIDNT_WORK.md) (what was tried and failed).
-
-Rules: no emulation (no CPU interpreter or recompiler, no GPU or OS emulation; 3DS library calls are
-replaced function by function), hand-written GLSL shaders, no game data in the repository.
-
-## Credits
-
-Built on **[albw-decomp-ai](https://github.com/7akeem0/albw-decomp-ai)** by
-**[7akeem0](https://github.com/7akeem0)** and contributors, the matching decompilation of
-*A Link Between Worlds*: its matched sources (about 16,000 functions), address map and headers are
-the base of the game code here (`decomp/` is a snapshot of them). Thanks also to
-**[matthis](https://github.com/mmaupas/albw-decomp-ai)** for the decomp's automation tools, shared
-headers and many matches. Unmatched functions come from [Ghidra](https://github.com/NationalSecurityAgency/ghidra)
-output. Windowing, input and audio use [SDL3](https://www.libsdl.org/).
-
-## License
-
-The port's own code (`native/`, `tools/`, `windows/`, scripts) is MIT: see [LICENSE](LICENSE). It
-does not cover the game or its data. The decompiled sources in `decomp/` come from albw-decomp-ai
-(and Ghidra); that project has no license file yet, so the MIT license does not cover them.
-
-## Legal
-
-A fan project for preservation and study, not affiliated with or endorsed by Nintendo. *The Legend
-of Zelda* and *A Link Between Worlds* are trademarks of Nintendo. You must own the game and dump it
-yourself; do not ask for ROMs or keys.
+| 2026-11-22 | Step 4 done: `libmain.so` links. Ported for ARM / bionic: save-state contexts (`runtime/ss_ctx.c`: r4-r11, sp, lr, d8-d15; `AlbwCtx` is 26 words on ARM), the low-stack start without `swapcontext` (`runtime/lowmem.c`), crash / profiler PC (`arm_pc`, caller from `arm_lr`), `backtrace` for API < 33 + stdout/stderr -> logcat + `SDL_main` with paths (`runtime/android.c`, `android_compat.h`), `pthread_tryjoin_np` (`sdk/os.c`), x87 / SSE bits guarded. Float mode on ARM: FPSCR DN only. The 3DS also sets FZ, but ARM's FZ flushes denormal inputs too, which breaks the integer-in-float tests (see `albw_fp_set_3ds_mode`). Game and port are built with `-fno-stack-protector` on Android (32-bit ARM bionic has one process-wide canary, so save states couldn't restore it). The app reads the ROM from `/sdcard/Android/data/org.albw.port/files/rom.3ds` |

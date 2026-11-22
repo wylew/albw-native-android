@@ -780,7 +780,10 @@ def build_one(job):
     if ARCH64:
         cmd += ["-fms-extensions", "-Wno-error=int-to-pointer-cast"]  # __ptr32 (ALBW_GP)
     if ARM32:
-        cmd += ["-fPIC"]  # linked into libmain.so (NDK clang defaults to PIE)
+        # linked into libmain.so (NDK clang defaults to PIE). No stack protector: on 32-bit ARM
+        # Android the canary is one process-wide word (__stack_chk_guard), so frames restored from a
+        # save state of another run could not get theirs back (i386: per-thread %gs:0x14, ss_ctx.c)
+        cmd += ["-fPIC", "-fno-stack-protector"]
     if v4_enabled():
         cmd += ["-DALBW_V4"]  # ghidra_types.h round-3 helpers
         if v4_stage() >= 2:

@@ -12,7 +12,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#if !defined(__ANDROID__)
 #include <ucontext.h>
+#endif
 #include "runtime.h"
 
 #if defined(__x86_64__)
@@ -66,11 +68,21 @@ int albw_thread_create_low(pthread_t *out, const pthread_attr_t *attr_in, void *
 /* Run fn(arg) on the calling thread on the fixed main-thread stack (pmem.c slot 0: at the same
  * address in every run, for persistent save states; low memory, as x86-64 also needs). Same thread:
  * SDL / Qt keep their main-thread state. */
-static ucontext_t g_ret_ctx, g_low_ctx;
 static int (*g_low_fn)(void *);
 static void *g_low_arg;
 static int g_low_result;
+#if defined(__ANDROID__)
+/* bionic has no getcontext / makecontext / swapcontext: the save-state contexts (ss_ctx.c) do it */
+static AlbwCtx g_ret_actx;
+static void low_trampoline_ctx(void *unused) {
+    (void)unused;
+    g_low_result = g_low_fn(g_low_arg);
+    albw_ctx_jump(&g_ret_actx, 1);
+}
+#else
+static ucontext_t g_ret_ctx, g_low_ctx;
 static void low_trampoline(void) { g_low_result = g_low_fn(g_low_arg); }
+#endif
 
 int albw_run_on_low_stack(int (*fn)(void *), void *arg, size_t stack_size) {
     void *lo = NULL;
@@ -79,6 +91,11 @@ int albw_run_on_low_stack(int (*fn)(void *), void *arg, size_t stack_size) {
     stack_size = (size_t)(top - (uint8_t *)lo);
     g_low_fn = fn;
     g_low_arg = arg;
+#if defined(__ANDROID__)
+    (void)stack_size;
+    if (albw_ctx_save(&g_ret_actx) == 0) albw_ctx_run_on(top, low_trampoline_ctx, NULL);
+    return g_low_result;
+#else
     getcontext(&g_low_ctx);
     g_low_ctx.uc_stack.ss_sp = lo;
     g_low_ctx.uc_stack.ss_size = stack_size;
@@ -86,4 +103,5 @@ int albw_run_on_low_stack(int (*fn)(void *), void *arg, size_t stack_size) {
     makecontext(&g_low_ctx, low_trampoline, 0);
     swapcontext(&g_ret_ctx, &g_low_ctx);
     return g_low_result;
+#endif
 }
