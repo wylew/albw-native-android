@@ -9,6 +9,9 @@ are rewritten with SDL3 + OpenGL. No emulator.
 
 **Work in progress.** Playable through large parts of the story; expect bugs. See [Status](#status).
 
+**Android:** this fork is working on an Android build. It doesn't run on Android yet. Plan and
+progress: [Android port](#android-port-this-fork-in-progress).
+
 ## You need your own game
 
 No game data is included: no ROM, keys, assets or saves. You need a **decrypted dump of the
@@ -130,6 +133,79 @@ before a window opens, the AppImage shows the end of the log in a dialog (and co
 `wl-copy` / `xclip` exist); on Windows the log is copied to the clipboard by itself. The log file:
 `~/.local/state/albw-port/last-run.log` (AppImage, when not started from a terminal) or
 `albw.log` (Windows). In Steam Game Mode, read the file from Desktop Mode. The log has no ROM data.
+
+## Android port (this fork, in progress)
+
+**Does it run on Android yet? No.** This fork adds an Android build; nothing installs on a
+device yet. This section is the plan and the progress log. Update it with every step forward so
+the work can be picked up on any machine.
+
+Target device for testing: **Retroid Pocket 5** (Snapdragon 865 / Adreno 650, Android 13 / API 33,
+8 GB RAM, 1920x1080). It runs both `arm64-v8a` and `armeabi-v7a` apps.
+
+### Approach
+
+The playable PC build is a **32-bit** program (i386). The x86-64 build (`native/64BIT.md`) only
+boots as far as the title-screen logic. It also depends on `MAP_32BIT` and a non-PIE image at
+0x400000, which arm64 Android doesn't offer. So:
+
+1. **First target: `armeabi-v7a` (32-bit ARM).** This reuses the playable 32-bit code base
+   unchanged. Pointers are still 4 bytes, and the decompiled code came from 32-bit ARM, so the
+   original ABI fits better than i386 does. It runs on the RP5 and most devices up to about 2022.
+   Snapdragon 8 Gen 2 and newer phones, plus Pixel 7 and newer, can't run 32-bit apps.
+2. **Later: `arm64-v8a`.** This needs the 64-bit build at parity with 32-bit first. It also needs
+   low-memory reservations without `MAP_32BIT` (mmap hints / `MAP_FIXED_NOREPLACE` below 2 GiB),
+   a check that clang's `__ptr32` (`ALBW_GP`) works on AArch64, and the loader from step 4.
+
+### Constraints (read before starting)
+
+- **The APK contains ROM-derived code.** `build.sh` compiles the game code it extracts from your
+  ROM (`tools/extract_code.py`) into the binary. Build the APK locally from your own ROM and never
+  publish it or commit build output. The game also reads RomFS from the `.3ds` file at run time,
+  so the ROM has to be on the device too.
+- **Fixed addresses.** The 32-bit build expects its image at 0x08048000, game data at 0x30000000
+  (`--section-start` in `tools/link.sh`), VRAM at 0x1F000000 and game memory at
+  0x40000000-0x5C000000 (`native/sdk/memory.c`). Save states store these pointers. A 32-bit
+  Android app process already has ART, the linker and system libraries mapped, so these ranges
+  may be taken (ART's heap starts near 0x12C00000).
+- **Desktop GL only.** All 15 shaders are `#version 330 core`. The renderer uses `glLogicOp` /
+  `GL_COLOR_LOGIC_OP` (PICA logic ops; GLES has none) and `GL_CLAMP_TO_BORDER` /
+  `GL_TEXTURE_BORDER_COLOR` (GLES 3.2 has them, Adreno 650 supports 3.2).
+- **x86-specific code** (the parts to replace for ARM): `-m32` / `--target=i686-linux-gnu` /
+  `-m elf_i386` in `tools/link.sh`; the generated `thunks.s` (returns-this thunks) and
+  `boolret.s`; the x87 guard (`runtime/x87guard.c`, `x87pop.s`, `tools/x87check.py`); inline asm
+  in `runtime/{glibc_compat,ss_ctx,savestate}.c` and `sdk/{memory,os,boot_extra}.c`; register
+  reads in `ucontext` (crash handler, save states); `build_decomp.py --arch` (x86 / x86_64 only;
+  the i386 ABI checks).
+
+### Steps
+
+| # | Step | Done when | State |
+|---|---|---|---|
+| 0 | Plan | this section | **done** 2026-11-22 |
+| 1 | Toolchain: install the NDK (r27+) and set up a CMake/Gradle project under `android/` with SDL3's Android template (`SDLActivity`). Gradle comes from the wrapper; Android Studio's bundled JDK works | an empty SDL3 app (clears the screen, reads the gamepad) installs with `./gradlew installDebug` and runs on the RP5 | todo |
+| 2 | Memory map: log `/proc/self/maps` from the step-1 app (32-bit) at `SDL_main` time and check whether the fixed ranges above are free | table of free / taken ranges added here | todo |
+| 3 | ARM32 decomp build: add `--arch arm32` to `tools/build_decomp.py` (target `armv7a-linux-androideabi24`, NDK clang). Compile all of `build/decomp` for ARM and count failures against the i386 baseline (26,001 compiled / 270 failed) | failure count at or near the baseline | todo |
+| 4 | ARM32 link: `tools/link_android.sh`, mirroring `link.sh`. Port `thunks.s` / `boolret.s` to ARM (on ARM `this` and the return value share r0, so returns-this thunks may be trivial), drop the x87 parts, port the inline asm. Output: either (a) a shared library `libalbw.so` (game data relocated by the dynamic linker; save states go through `runtime/ss_convert.c`), or (b) a non-PIE image at the fixed addresses, loaded by a small loader like `windows/loader.c`. Try (a) first and fall back to (b) if step 2 shows clashes that matter | links with 0 unresolved symbols besides the known tripwire stubs | todo |
+| 5 | Headless boot on the device: push the binary + ROM via adb, run with `SDL_VIDEO_DRIVER=offscreen` (or with the GL draw path off) and reach the title-screen logic (`TaskFileSelect` 0029B698 called every frame, as in `native/BOOT_LOG64.md`) | title logic runs 60 s without a fatal | todo |
+| 6 | GLES renderer: a `#version 300 es` variant of the shaders (precision qualifiers, no `core`), an SDL GLES 3.2 context, logic ops done in the shader (framebuffer fetch on Adreno, `GL_EXT_shader_framebuffer_fetch`, or a fallback), checks for every desktop-only call | title screen draws correctly on the RP5 | todo |
+| 7 | Android platform layer: ROM picked with the system file picker (SAF) and copied to app storage (for development: `adb push` to `/sdcard/Android/data/<package>/files/`); saves / states / config under `SDL_GetPrefPath`; audio through SDL (AAudio); log viewable via `adb logcat` | boots from the APK alone, saves survive a restart | todo |
+| 8 | Controls and layout: RP5 buttons through the SDL gamepad API; landscape layout (top screen large, bottom screen beside it, or single-screen mode by default); touch input for the bottom screen; a button combo for the Esc menu | playable start to Eastern Palace on the RP5 | todo |
+| 9 | Packaging: `android/build_apk.sh` (ROM path argument, like `build.sh`), release-signed local APK, docs in the Play section | one command makes an installable APK | todo |
+| 10 | arm64-v8a (see Approach) | runs on a 64-bit-only device | todo |
+
+### Working on it from another machine
+
+You need: Linux with clang + lld (as `build.sh` installs), Python 3, the Android SDK + NDK, the
+EU ROM (never committed) and a device with USB debugging on (`adb devices` lists it). Check the
+table above for the next `todo`. Record what you learned in the step's row and in the log below,
+then commit.
+
+### Progress log
+
+| Date | What |
+|---|---|
+| 2026-11-22 | Plan written. Checked: the RP5 lists `arm64-v8a,armeabi-v7a,armeabi`, Android 13 (API 33). On the dev machine the SDK has build-tools 35/36 and platforms 36/37 but no NDK. No Android code in the repo yet |
 
 ## Status
 
