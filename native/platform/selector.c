@@ -14,7 +14,7 @@
 
 /* the platform blit with a texture sub-rectangle (uvr = u0, v0, du, dv) */
 static const char *SEL_VS =
-    "#version 330 core\n"
+    GLSL_HDR
     "uniform vec4 rect; uniform vec4 uvr; out vec2 uv;\n"
     "void main(){ vec2 p = vec2(gl_VertexID & 1, gl_VertexID >> 1); uv = uvr.xy + p * uvr.zw;\n"
     "  gl_Position = vec4(rect.xy + p * rect.zw, 0, 1); }\n";

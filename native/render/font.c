@@ -25,11 +25,12 @@
  * Vertex input v0 = (rect slot, vertex index, corner x in {0,1}, corner y in {0,-1}).
  * Outputs: o0 position, o1 colour, o2/o3/o4 texcoord 0/1/2 (FS_TEV inputs v_color, v_tc0..2). */
 #include "font.h"
+#include "../platform/gl.h"   /* GLSL_HDR */
 
 #include <string.h>
 
 const char RENDER_VS_FONT_RECT[] =
-    "#version 330 core\n"
+    GLSL_HDR
     "layout(location = 0) in vec4 v0; layout(location = 1) in vec4 v1; layout(location = 2) in vec4 v2;\n"
     "layout(location = 3) in vec4 v3; layout(location = 4) in vec4 v4; layout(location = 5) in vec4 v5;\n"
     "layout(location = 6) in vec4 v6; layout(location = 7) in vec4 v7;\n"

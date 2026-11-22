@@ -200,16 +200,16 @@ static void plat_apply_render_scale(int r) {
 }
 
 static const char *BLIT_VS =
-    "#version 330 core\n"
+    GLSL_HDR
     "uniform vec4 rect; out vec2 uv;\n"
     "void main(){ vec2 p = vec2(gl_VertexID & 1, gl_VertexID >> 1); uv = p;\n"
     "  gl_Position = vec4(rect.xy + p * rect.zw, 0, 1); }\n";
 static const char *BLIT_FS =
-    "#version 330 core\n"
+    GLSL_HDR
     "in vec2 uv; out vec4 o; uniform sampler2D tex;\n"
     "void main(){ o = texture(tex, uv); }\n";
 
-#ifndef ALBW_WINDOWS
+#if !defined(ALBW_WINDOWS) && !defined(__ANDROID__)
 /* Hybrid laptops (Intel / AMD graphics + an NVIDIA GPU, "Optimus"): OpenGL runs on the built-in GPU
  * unless the program asks for the NVIDIA one (GitHub issue 5). Ask the way NVIDIA's prime-run does:
  * __NV_PRIME_RENDER_OFFLOAD=1 and __GLX_VENDOR_LIBRARY_NAME=nvidia, set before SDL loads OpenGL.
@@ -248,7 +248,7 @@ static void plat_pick_hybrid_gpu(void) {
 int plat_init(const char *title, const PlatConfig *c) {
     cfg = *c;
     if (cfg.scale < 1) cfg.scale = 2;
-#ifndef ALBW_WINDOWS   /* Linux only (the Windows build, windows/README.md, uses SDL's own driver) */
+#if !defined(ALBW_WINDOWS) && !defined(__ANDROID__)   /* Linux only (the Windows build, windows/README.md, uses SDL's own driver) */
     {
         /* GPU on NVIDIA + Wayland: this 32-bit build's EGL needs the 32-bit egl-wayland platform
          * library; without it EGL falls back to Mesa's software rasteriser (llvmpipe: ~20-25 fps,
@@ -273,11 +273,18 @@ int plat_init(const char *title, const PlatConfig *c) {
     }
     input_init();  /* keyboard + controllers: config, mapping DB, already connected pads */
     int debug = getenv("ALBW_GL_DEBUG") != NULL;
+#ifdef ALBW_GLES   /* Android (gl.h): OpenGL ES 3.2 (Adreno 6xx and newer, Mali-G7x, ...) */
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, debug ? SDL_GL_CONTEXT_DEBUG_FLAG : 0);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG |
                                               (debug ? SDL_GL_CONTEXT_DEBUG_FLAG : 0));
+#endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     /* the window needs no depth/stencil: the game renders into the screen targets */
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
@@ -331,10 +338,17 @@ int plat_init(const char *title, const PlatConfig *c) {
             fprintf(stderr, "GL: WARNING: software rasteriser (%s): expect ~20-25 fps and every core busy.\n"
                     "    On NVIDIA + Wayland the 32-bit EGL needs lib32 egl-wayland; or run with SDL_VIDEO_DRIVER=x11.\n", rnd);
     }
+#ifdef ALBW_GLES
+    if (major * 10 + minor < 32) {
+        fprintf(stderr, "OpenGL ES %d.%d is too old: 3.2 is required.\n", major, minor);
+        return -1;
+    }
+#else
     if (major * 10 + minor < 33) {
         fprintf(stderr, "OpenGL %d.%d is too old: 3.3 is required.\n", major, minor);
         return -1;
     }
+#endif
     if (debug) gl_enable_debug((void *(*)(const char *))SDL_GL_GetProcAddress);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);

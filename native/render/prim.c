@@ -14,9 +14,10 @@
  * textured quad, 00496F50 sphere) never select it (sdk/prim.c records its state only).
  * PICA clip space -> GL: pica_out (render.c conventions). */
 #include "prim.h"
+#include "../platform/gl.h"   /* GLSL_HDR */
 
 const char RENDER_VS_PRIMITIVE[] =
-    "#version 330 core\n"
+    GLSL_HDR
     "layout(location = 0) in vec4 v0; layout(location = 1) in vec4 v1; layout(location = 2) in vec4 v2;\n"
     "uniform vec4 c[96]; uniform int b;\n"
     "out vec4 v_color; out vec4 v_tc0; out vec2 v_tc1; out vec2 v_tc2; out vec3 v_normal; out vec3 v_view;\n"

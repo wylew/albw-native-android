@@ -117,8 +117,6 @@
     X(void, CullFace, (GLenum)) \
     X(void, FrontFace, (GLenum)) \
     X(void, PolygonOffset, (GLfloat, GLfloat)) \
-    X(void, DepthRange, (double, double)) \
-    X(void, LogicOp, (GLenum)) \
     X(void, ClearBufferfv, (GLenum, GLint, const GLfloat *)) \
     X(void, ClearBufferfi, (GLenum, GLint, GLfloat, GLint)) \
     X(void, Uniform1iv, (GLint, GLsizei, const GLint *)) \
@@ -134,12 +132,35 @@
     X(void, ReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *)) \
     X(void, DrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void *, GLint)) \
     X(void, BindAttribLocation, (GLuint, GLuint, const GLchar *)) \
-    X(void, BindFragDataLocation, (GLuint, GLuint, const GLchar *)) \
     X(void, DrawBuffers, (GLsizei, const GLenum *))
+
+/* desktop-only or differently named on OpenGL ES (gl.h ALBW_GLES): loaded without failing */
+#define RGL_OPT_FUNCS(X) \
+    X(void, DepthRange, (double, double)) \
+    X(void, DepthRangef, (GLfloat, GLfloat)) \
+    X(void, LogicOp, (GLenum)) \
+    X(void, BindFragDataLocation, (GLuint, GLuint, const GLchar *))
 
 #define RGL_DEFINE(ret, name, args) static ret(*rgl##name) args;
 RGL_FUNCS(RGL_DEFINE)
+RGL_OPT_FUNCS(RGL_DEFINE)
 #undef RGL_DEFINE
+
+/* glDepthRange takes doubles on desktop GL; OpenGL ES only has glDepthRangef */
+static void depth_range(float n, float f) {
+    if (rglDepthRangef) rglDepthRangef(n, f);
+    else if (rglDepthRange) rglDepthRange(n, f);
+}
+/* GL entry point, or its EXT / OES name (OpenGL ES drivers that expose a feature as an extension) */
+static void *rgl_proc(const char *name) {
+    void *p = (void *)SDL_GL_GetProcAddress(name);
+    char alt[96];
+    for (int i = 0; !p && i < 2; i++) {
+        snprintf(alt, sizeof alt, "%s%s", name, i ? "OES" : "EXT");
+        p = (void *)SDL_GL_GetProcAddress(alt);
+    }
+    return p;
+}
 
 /* ================================================================== small helpers */
 
@@ -396,7 +417,7 @@ static const char FS_TEV[] =
  * uniform registers c[0..95] (rows of matrices as the game uploads them), bool uniforms b, input
  * registers v0..v11. pica_out() converts PICA clip space (z in [-w, 0]) to GL. */
 #define VS_HEAD \
-    "#version 330 core\n" \
+    GLSL_HDR \
     "layout(location = 0) in vec4 v0; layout(location = 1) in vec4 v1; layout(location = 2) in vec4 v2;\n" \
     "layout(location = 3) in vec4 v3; layout(location = 4) in vec4 v4; layout(location = 5) in vec4 v5;\n" \
     "layout(location = 6) in vec4 v6; layout(location = 7) in vec4 v7;\n" \
@@ -432,10 +453,10 @@ static const char *VS_SRC[RPROG_COUNT] = { /* RPROG_H3D_DEFAULT: extension GLSL 
 
 /* fragment program source (FL: with the fragment-lighting GLSL) */
 static char *fs_source(bool fl) {
-    size_t n = strlen(FS_HEAD) + strlen(FS_TEV) + strlen(RENDER_FS_FRAGLIGHT) + 64;
+    size_t n = sizeof GLSL_HDR + strlen(FS_HEAD) + strlen(FS_TEV) + strlen(RENDER_FS_FRAGLIGHT) + 64;
     char *s = xrealloc(NULL, n);
     { static int dbg = -1; if (dbg < 0) { const char *e = getenv("ALBW_FS_DEBUG"); dbg = e ? atoi(e) : 0; }
-      snprintf(s, n, "#version 330 core\n#define FL %d\n#define DBGOUT %d\n%s%s%s", fl ? 1 : 0, dbg, FS_HEAD, fl ? RENDER_FS_FRAGLIGHT : "", FS_TEV); }
+      snprintf(s, n, GLSL_HDR "#define FL %d\n#define DBGOUT %d\n%s%s%s", fl ? 1 : 0, dbg, FS_HEAD, fl ? RENDER_FS_FRAGLIGHT : "", FS_TEV); }
     return s;
 }
 
@@ -511,9 +532,9 @@ static Program *build_variant(int v) {
     if (!p->prog) {
         char def[512];
         R.ext.h3d_defines(v, def, sizeof def);
-        size_t n = strlen(def) + strlen(R.ext.h3d_vs_body) + 32;
+        size_t n = sizeof GLSL_HDR + strlen(def) + strlen(R.ext.h3d_vs_body) + 32;
         char *src = xrealloc(NULL, n);
-        snprintf(src, n, "#version 330 core\n%s\n%s", def, R.ext.h3d_vs_body);
+        snprintf(src, n, GLSL_HDR "%s\n%s", def, R.ext.h3d_vs_body);
         program_init(p, src, true); /* the DefaultShader GLSL outputs v_tangent */
         render_variant_builds++;
         free(src);
@@ -523,12 +544,12 @@ static Program *build_variant(int v) {
 }
 
 static const char *SCAN_VS =
-    "#version 330 core\n"
+    GLSL_HDR
     "out vec2 uv;\n"
     "void main(){ vec2 p = vec2(gl_VertexID & 1, gl_VertexID >> 1); uv = p;\n"
     "  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
 static const char *SCAN_FS =
-    "#version 330 core\n"
+    GLSL_HDR
     "in vec2 uv; out vec4 o; uniform sampler2D img; uniform int rot;\n"
     "void main(){ vec2 t = rot == 0 ? uv : rot == 1 ? vec2(uv.y, 1.0 - uv.x) : vec2(uv.y, uv.x);\n"
     "  o = vec4(texture(img, t).rgb, 1.0); }\n";
@@ -547,10 +568,17 @@ int render_ready(void) {
     g_trace = getenv("ALBW_RENDER_TRACE") != NULL;
     int missing = 0;
 #define RGL_LOAD(ret, name, args) \
-    rgl##name = (ret(*) args)SDL_GL_GetProcAddress("gl" #name); \
+    rgl##name = (ret(*) args)rgl_proc("gl" #name); \
     if (!rgl##name) { rlog("GL: missing gl%s", #name); missing++; }
     RGL_FUNCS(RGL_LOAD)
 #undef RGL_LOAD
+#define RGL_LOAD_OPT(ret, name, args) rgl##name = (ret(*) args)SDL_GL_GetProcAddress("gl" #name);
+    RGL_OPT_FUNCS(RGL_LOAD_OPT)
+#undef RGL_LOAD_OPT
+#ifdef ALBW_GLES
+    rglDepthRange = NULL;   /* some ES drivers export the desktop name too: never call it with doubles */
+    rglLogicOp = NULL;
+#endif
     if (missing) {
         R.failed = true;
         unlock();
@@ -949,7 +977,7 @@ int render_scanout(int screen, const void *mem) {
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
         glDisable(GL_CULL_FACE);
-        glDisable(GL_COLOR_LOGIC_OP);
+        if (rglLogicOp) glDisable(GL_COLOR_LOGIC_OP);
         glDisable(GL_STENCIL_TEST);
         rglColorMask(1, 1, 1, 1);
         glUseProgram(R.scan_prog);
@@ -1180,7 +1208,11 @@ static void sampler_params(GLenum target, const RTexUnit *u, int *ws, int *wt, i
     {   /* experiment: ALBW_TEX_LODBIAS=<f> added to every texture's LOD bias */
         static float xb = -1e9f;
         if (xb == -1e9f) { const char *e = getenv("ALBW_TEX_LODBIAS"); xb = e ? (float)atof(e) : 0.0f; }
+#ifndef ALBW_GLES   /* OpenGL ES has no per-texture LOD bias (the shader could add it: not done yet) */
         rglTexParameterf(target, GL_TEXTURE_LOD_BIAS, u->lod_bias + xb);
+#else
+        (void)xb;
+#endif
     }
 }
 
@@ -1290,10 +1322,13 @@ static void apply_frag(void) {
     const RFragState *f = &R.frag;
     if (f->logic_enable) {
         glDisable(GL_BLEND);
-        glEnable(GL_COLOR_LOGIC_OP);
-        rglLogicOp(GL_CLEAR + LOGIC[f->logic_op & 15]);
+        /* OpenGL ES has no logic ops: drawn as COPY (blending off), which is what most passes use */
+        if (rglLogicOp) {
+            glEnable(GL_COLOR_LOGIC_OP);
+            rglLogicOp(GL_CLEAR + LOGIC[f->logic_op & 15]);
+        }
     } else {
-        glDisable(GL_COLOR_LOGIC_OP);
+        if (rglLogicOp) glDisable(GL_COLOR_LOGIC_OP);
         if (f->blend_enable) {
             glEnable(GL_BLEND);
             rglBlendEquationSeparate(BEQ[f->eq_rgb < 5 ? f->eq_rgb : 0], BEQ[f->eq_a < 5 ? f->eq_a : 0]);
@@ -1334,7 +1369,7 @@ static void apply_frag(void) {
     }
     float n = f->depth_near, fa = f->depth_far;
     if (n == fa) { n = 0; fa = 1; }
-    rglDepthRange(n < 0 ? 0 : n > 1 ? 1 : n, fa < 0 ? 0 : fa > 1 ? 1 : fa);
+    depth_range(n < 0 ? 0 : n > 1 ? 1 : n, fa < 0 ? 0 : fa > 1 ? 1 : fa);
     if (f->poly_offset_enable) {
         glEnable(GL_POLYGON_OFFSET_FILL);
         {   /* experiment: ALBW_POLYOFS_SCALE=<f> multiplies every depth offset (z-fighting tests) */

@@ -100,13 +100,13 @@ static const MenuDef menu_defs[] = {
 static const int menu_speeds[] = {25, 50, 100, 200, 0};   /* Debug > Speed, percent (0 = unlimited) */
 
 static const char *MENU_VS =
-    "#version 330 core\n"
+    GLSL_HDR
     "layout(location=0) in vec2 pos; layout(location=1) in vec2 uv; layout(location=2) in vec4 col;\n"
     "uniform vec4 size; out vec2 v_uv; out vec4 v_col;\n"
     "void main() { gl_Position = vec4(pos.x / size.x * 2.0 - 1.0, 1.0 - pos.y / size.y * 2.0, 0.0, 1.0);\n"
     "  v_uv = uv; v_col = col; }\n";
 static const char *MENU_FS =
-    "#version 330 core\n"
+    GLSL_HDR
     "in vec2 v_uv; in vec4 v_col; uniform sampler2D tex; out vec4 o;\n"
     "void main() { o = vec4(v_col.rgb, v_col.a * texture(tex, v_uv).r); }\n";
 

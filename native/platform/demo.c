@@ -5,12 +5,12 @@
 #include "platform.h"
 
 static const char *VS =
-    "#version 330 core\n"
+    GLSL_HDR
     "layout(location=0) in vec2 p; uniform float t; uniform float aspect;\n"
     "void main(){ float c=cos(t), s=sin(t); vec2 q=vec2(c*p.x-s*p.y, s*p.x+c*p.y);\n"
     "  gl_Position=vec4(q.x/aspect, q.y, 0, 1); }\n";
 static const char *FS =
-    "#version 330 core\n"
+    GLSL_HDR
     "uniform vec4 col; out vec4 o; void main(){ o=col; }\n";
 
 int main(int argc, char **argv) {

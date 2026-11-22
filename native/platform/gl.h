@@ -1,7 +1,21 @@
-/* Minimal OpenGL 3.3 core loader (no GLEW): function pointers resolved through SDL. */
+/* Minimal OpenGL 3.3 core loader (no GLEW): function pointers resolved through SDL.
+ * ALBW_GLES (always on Android): OpenGL ES 3.2 instead. Every shader starts with GLSL_HDR, which
+ * is the matching #version line (plus default precisions on ES); the C side checks ALBW_GLES for
+ * the few calls desktop GL has and ES does not (logic ops, texture LOD bias, glDepthRange). */
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+
+#if defined(__ANDROID__) && !defined(ALBW_GLES)
+#define ALBW_GLES 1
+#endif
+#ifdef ALBW_GLES
+#define GLSL_HDR "#version 320 es\n" \
+    "precision highp float;\nprecision highp int;\nprecision highp sampler2D;\n" \
+    "precision highp samplerCube;\nprecision highp usampler2D;\nprecision highp isampler2D;\n"
+#else
+#define GLSL_HDR "#version 330 core\n"
+#endif
 
 typedef unsigned int GLenum, GLuint, GLbitfield;
 typedef int GLint, GLsizei;

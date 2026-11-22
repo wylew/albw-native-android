@@ -27,11 +27,12 @@
  * v = 1 - ((-0.5 + r.y) (-c83.y) + c3.y + (1 - c3.w) r.y)  (c4 / c83.zw for texture 1).
  * Not written: the stripe / complex-shape family (3 programs, entry 0x79). */
 #include "effects.h"
+#include "../platform/gl.h"   /* GLSL_HDR */
 
 #include <string.h>
 
 const char RENDER_VS_EFT[] =
-    "#version 330 core\n"
+    GLSL_HDR
     "layout(location = 0) in vec4 v0;\n"
     "uniform vec4 c[96]; uniform int b;\n"
     "out vec4 v_color; out vec4 v_tc0; out vec2 v_tc1; out vec2 v_tc2; out vec3 v_normal; out vec3 v_view;\n"
