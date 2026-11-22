@@ -566,9 +566,13 @@ static void vtx_upload(H3dVtx *v, uint32_t verts) {
  * 28 bits are kept. The full address is the one with those low 28 bits that is nearest the
  * mesh's vertex buffer (same file, same heap block; its address register 0x203 is a full word).
  * Pure address arithmetic, decided once per draw op. */
+void albw_gfx_vram(uint8_t **base, size_t *size);   /* native/sdk/gfx.c */
 static int index_region_ok(uint32_t a) {
-    /* VRAM, or the fixed game memory areas (runtime/pmem.c: heap, device, arena 0x40000000..) */
-    return (a >= 0x1F000000u && a < 0x1F600000u) || (a >= 0x40000000u && a < 0x58000000u);
+    /* VRAM (0x1F000000 on the PC, a block in libmain.so on Android), or the fixed game memory areas
+     * (runtime/pmem.c: heap, device, arena 0x40000000..) */
+    static uint32_t vlo, vhi;
+    if (!vhi) { uint8_t *b; size_t n; albw_gfx_vram(&b, &n); vlo = (uint32_t)(uintptr_t)b; vhi = vlo + (uint32_t)n; }
+    return (a >= vlo && a < vhi) || (a >= 0x40000000u && a < 0x58000000u);
 }
 static uintptr_t index_addr(const H3dVtx *v, uint32_t word) {
     /* the game memory areas now sit at fixed addresses below 0x5C000000, so the whole 31-bit

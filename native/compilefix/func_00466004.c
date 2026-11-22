@@ -398,7 +398,7 @@ LAB_004664fc:
               if ((uVar2 < *DAT_00466ad4) || (*DAT_00466adc < uVar2)) {
                 if (((*DAT_00466ae0 & 1) == 0) &&
                    (iVar10 = func_00100174((int *)DAT_00466ae0), iVar10 != 0)) {
-                  uVar8 = func_001139F8(0x1f000000);
+                  uVar8 = func_001139F8(ALBW_VRAM_ADDR(0x1f000000));
                   *DAT_00466ae4 = uVar8;
                 }
                 if (((*DAT_00466ae8 & 1) == 0) &&

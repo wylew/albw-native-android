@@ -31,6 +31,15 @@ extern "C" {
 /* the game's thread-local storage block (TLS), provided by the native platform layer */
 #include <stdint.h>
 uintptr_t albw_tls(void);
+/* a hard-coded 3DS VRAM address (0x1F000000..0x1F5FFFFF) in game code: on Android VRAM is the block
+ * albw_vram in libmain.so (native/sdk/gfx.c), elsewhere it is mapped at the 3DS address itself */
+#if defined(__ANDROID__)
+extern unsigned char albw_vram[];
+#define ALBW_VRAM_ADDR(a) ((unsigned int)(unsigned long)albw_vram + ((unsigned int)(a) - 0x1F000000u))
+#else
+#define ALBW_VRAM_ADDR(a) (a)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -278,9 +278,21 @@ static uint8_t *g_vram;              /* VRAM_SIZE bytes */
 static uint64_t g_t0;
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 
+#if defined(__ANDROID__)
+/* Android: 0x1F000000 lies inside ART's Java heap (README: Android memory map), so VRAM is this
+ * block in libmain.so; the game's few hard-coded 3DS VRAM addresses are mapped onto it at build
+ * time (ALBW_VRAM_ADDR in albw_native.h, VRAM pool words in tools/link_android.sh) */
+__attribute__((aligned(0x100000))) uint8_t albw_vram[VRAM_SIZE];
+#endif
+
 static void init_once(void) {
     g_trace = getenv("ALBW_GFX_TRACE") != NULL;
     g_t0 = now_ns();
+#if defined(__ANDROID__)
+    g_vram = albw_vram;
+    gfx_log("VRAM %p..%p (in libmain.so)", (void *)g_vram, (void *)(g_vram + VRAM_SIZE - 1));
+    return;
+#endif
     /* VRAM at its 3DS address if free (see header), else anywhere low */
     void *want = (void *)(uintptr_t)VRAM_3DS_BASE;
     void *p = mmap(want, VRAM_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,

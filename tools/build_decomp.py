@@ -783,7 +783,10 @@ def build_one(job):
         # linked into libmain.so (NDK clang defaults to PIE). No stack protector: on 32-bit ARM
         # Android the canary is one process-wide word (__stack_chk_guard), so frames restored from a
         # save state of another run could not get theirs back (i386: per-thread %gs:0x14, ss_ctx.c)
-        cmd += ["-fPIC", "-fno-stack-protector"]
+        # -fsigned-char: plain char is unsigned on ARM, signed on i386; the converted sources mean
+        # signed (Ghidra `char` = ldrsb) and the playable PC build compiles them signed (Android stop A3:
+        # a (char)-1 device index read as 255)
+        cmd += ["-fPIC", "-fno-stack-protector", "-fsigned-char"]
     if v4_enabled():
         cmd += ["-DALBW_V4"]  # ghidra_types.h round-3 helpers
         if v4_stage() >= 2:

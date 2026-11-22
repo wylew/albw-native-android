@@ -3,7 +3,7 @@
 #   tools/build_decomp_arm32.sh      (once: decomp objects -> build/decomp-arm32)
 #   tools/link_android.sh            -> build/android/jniLibs/armeabi-v7a/{libmain,libSDL3}.so
 # Mirrors tools/link.sh. Differences:
-#   - NDK clang, -fPIC -fno-stack-protector (runtime/ss_ctx.c), softfp VFP; a shared library
+#   - NDK clang, -fPIC -fno-stack-protector (runtime/ss_ctx.c), -fsigned-char (as on i386), softfp VFP; a shared library
 #     loaded by SDLActivity (entry: SDL_main in native/runtime/android.c), -Bsymbolic;
 #   - no fixed section addresses (0x30000000 is inside ART's heap on Android, README memory map);
 #     generated game data is writable (it holds pointers: no text relocations on Android);
@@ -27,7 +27,7 @@ SDLP=$B/deps/sdl3-android-armv7
 TARGET=--target=armv7a-linux-androideabi$API
 FPFLAGS=(-mfpu=neon -mfloat-abi=softfp -ffp-contract=off)
 CFLAGS=($TARGET -std=gnu11 -O2 -g -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing -fPIC
-        -fno-stack-protector "${FPFLAGS[@]}" -DALBW_ANDROID -include native/runtime/android_compat.h)
+        -fno-stack-protector -fsigned-char "${FPFLAGS[@]}" -DALBW_ANDROID -include native/runtime/android_compat.h)
 SDL_CFLAGS=(-I$SDLP/include)
 DECOMP_MAP=decomp/eu_usa_map.json
 CODE_BIN=${ALBW_CODE_BIN:-$B/rom/eu_code.bin}
@@ -36,11 +36,11 @@ mkdir -p $A/native $A/data
 
 NATIVE=()
 FAILED=()
-for f in native/platform/platform.c native/runtime/*.c native/audio/mixer.c native/audio/fx.c native/audio/output.c $(ls native/render/*.c native/sdk/*.c native/game/*.c native/robust/*.c native/gameplay/*.c native/compilefix/*.c native/framework/*.c native/core/*.c native/route/*.c 2>/dev/null) $(git ls-files native/hot | grep -E "^native/hot/[^/]+\.c$"); do
+for f in native/platform/platform.c native/runtime/*.c native/audio/mixer.c native/audio/fx.c native/audio/output.c $(ls native/render/*.c native/sdk/*.c native/game/*.c native/robust/*.c native/gameplay/*.c native/compilefix/*.c native/framework/*.c native/core/*.c native/route/*.c native/android/*.c 2>/dev/null) $(git ls-files native/hot | grep -E "^native/hot/[^/]+\.c$"); do
     o=$NOBJ/${f%.c}.o
     mkdir -p "$(dirname "$o")"
     EXTRA=()
-    [[ "$f" == native/game/* || "$f" == native/robust/* || "$f" == native/gameplay/* || "$f" == native/compilefix/* || "$f" == native/framework/* || "$f" == native/core/* || "$f" == native/hot/* || "$f" == native/route/* ]] && EXTRA=(-DALBW_LINK_GAME_003E6AA8 -DALBW_V4 -Inative/route -Inative/robust -Inative/gameplay -Inative/compilefix -Inative/framework -Inative/core -Inative/hot -include native/albw_native.h -I$D/shared/include -w -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -Wno-error=incompatible-function-pointer-types -Wno-error=return-type)
+    [[ "$f" == native/android/* || "$f" == native/game/* || "$f" == native/robust/* || "$f" == native/gameplay/* || "$f" == native/compilefix/* || "$f" == native/framework/* || "$f" == native/core/* || "$f" == native/hot/* || "$f" == native/route/* ]] && EXTRA=(-DALBW_LINK_GAME_003E6AA8 -DALBW_V4 -Inative/route -Inative/robust -Inative/gameplay -Inative/compilefix -Inative/framework -Inative/core -Inative/hot -include native/albw_native.h -I$D/shared/include -w -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types -Wno-error=incompatible-function-pointer-types -Wno-error=return-type)
     if [[ "${ALBW_REAL_SND:-1}" == 0 && ( "$f" == native/sdk/snd.c || "$f" == native/audio/* ) ]]; then continue; fi
     if [[ "$f" == native/sdk/snd_silent.c ]]; then
         [[ "${ALBW_REAL_SND:-1}" != 0 ]] && EXTRA+=(-DALBW_REAL_SND)
@@ -73,6 +73,24 @@ python3 tools/gen_data.py --addr-taken $A/addr_taken_pool.txt --code "$CODE_BIN"
 # writable (pointer words need dynamic relocations; Android refuses text relocations)
 sed -E -e 's/,@(nobits|progbits)/,%\1/' -e 's/^(\s*\.section\s+[^,]+),"a"/\1,"aw"/' \
     $A/data/gamedata_gen.s > $A/data/gamedata.s
+# 3DS VRAM addresses in the literal pools (VRAM-A/B starts and ends, read by Ghidra-derived code as
+# DAT_ words) -> the host VRAM block albw_vram (native/sdk/gfx.c; README: Android boot stop A4).
+# Only these exact values, only in pool sections (0x1F000023 etc. are IPC headers, not addresses).
+python3 - $A/data/gamedata.s <<'PY'
+import re, sys
+p = sys.argv[1]
+VR = {0x1F000000, 0x1F180000, 0x1F2FFFFF, 0x1F300000, 0x1F380000, 0x1F5FFFFF}
+out, sec, n = [], "", 0
+for line in open(p):
+    m = re.match(r"\s*\.section\s+([^,\s]+)", line)
+    if m: sec = m.group(1)
+    m = re.match(r"(\s*\.long )0x([0-9A-Fa-f]{8})\s*$", line)
+    if m and sec == ".rodata.albw_pool" and int(m.group(2), 16) in VR:
+        line = "%salbw_vram + 0x%X\n" % (m.group(1), int(m.group(2), 16) - 0x1F000000); n += 1
+    out.append(line)
+open(p, "w").writelines(out)
+print("link_android: %d VRAM pool words -> albw_vram" % n)
+PY
 clang $TARGET -c $A/data/gamedata.s -o $A/data/gamedata.o
 python3 -c "import json;print('\n'.join(json.load(open('$D/report.json'))['objects']))" > $A/objs.txt
 echo $A/data/gamedata.o >> $A/objs.txt
