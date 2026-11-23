@@ -11,7 +11,7 @@ if (!File(sdlDir, "CMakeLists.txt").exists()) {
 }
 // The game: tools/link_android.sh -> build/android/jniLibs/<abi>/{libmain,libSDL3}.so.
 // Without it (or with -Psmoke) the step-1 smoke test is built from src/main/cpp instead.
-val gameLibs = File(repoRoot, "build/android/jniLibs")
+val gameLibs = File(project.findProperty("gameLibs")?.toString() ?: File(repoRoot, "build/android/jniLibs").path)
 val useGame = File(gameLibs, "armeabi-v7a/libmain.so").exists() && !project.hasProperty("smoke")
 
 android {

@@ -787,6 +787,10 @@ def build_one(job):
         # signed (Ghidra `char` = ldrsb) and the playable PC build compiles them signed (Android stop A3:
         # a (char)-1 device index read as 255)
         cmd += ["-fPIC", "-fno-stack-protector", "-fsigned-char"]
+        if os.environ.get("ALBW_UBSAN"):
+            # debug build (build/decomp-arm32-ubsan): log out-of-range float -> int conversions
+            # (x86 wraps them, ARM saturates: tools/link_android.sh with ALBW_UBSAN=1)
+            cmd += ["-fsanitize=" + os.environ["ALBW_UBSAN"]]
     if v4_enabled():
         cmd += ["-DALBW_V4"]  # ghidra_types.h round-3 helpers
         if v4_stage() >= 2:
@@ -1043,6 +1047,8 @@ def main():
     global OUT, TARGET, CTORS, ARCH64, ARM32
     if a.arch == "arm32":
         OUT, TARGET, ARM32 = os.path.join(ROOT, "build", "decomp-arm32"), "armv7a-linux-androideabi24", True
+        if os.environ.get("ALBW_UBSAN"):
+            OUT += "-ubsan"
         os.environ["ALBW_ARCH"] = "arm32"
     if a.arch == "x86_64":
         OUT, TARGET, ARCH64 = os.path.join(ROOT, "build", "decomp64"), "x86_64-linux-gnu", True

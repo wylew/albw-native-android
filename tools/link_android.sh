@@ -14,6 +14,11 @@ cd "$(dirname "$0")/.."
 B=build
 D=$B/decomp-arm32            # decomp objects (build_decomp.py --arch arm32)
 A=$B/android                 # everything this script makes
+# ALBW_UBSAN=<checks> (e.g. float-cast-overflow): debug build with UndefinedBehaviorSanitizer checks
+# that log and go on: decomp objects from build/decomp-arm32-ubsan (tools/build_decomp_arm32.sh with
+# the same ALBW_UBSAN), the native code instrumented too, the sanitizer runtime packaged next to it
+UBSAN=${ALBW_UBSAN:-}
+if [[ -n $UBSAN ]]; then D=$B/decomp-arm32-ubsan; A=$B/android-ubsan; fi
 NOBJ=$A/nobj
 API=24
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}
@@ -28,6 +33,8 @@ TARGET=--target=armv7a-linux-androideabi$API
 FPFLAGS=(-mfpu=neon -mfloat-abi=softfp -ffp-contract=off)
 CFLAGS=($TARGET -std=gnu11 -O2 -g -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing -fPIC
         -fno-stack-protector -fsigned-char "${FPFLAGS[@]}" -DALBW_ANDROID -include native/runtime/android_compat.h)
+SANFLAGS=()
+[[ -n $UBSAN ]] && SANFLAGS=(-fsanitize=$UBSAN) && CFLAGS+=("${SANFLAGS[@]}")
 SDL_CFLAGS=(-I$SDLP/include)
 DECOMP_MAP=decomp/eu_usa_map.json
 CODE_BIN=${ALBW_CODE_BIN:-$B/rom/eu_code.bin}
@@ -118,15 +125,36 @@ llvm-objcopy --remove-section=.init_array --remove-section=.rel.init_array \
              --remove-section=.ctors --remove-section=.rel.ctors $A/albw_game.o
 
 # returns-this thunks (see link.sh): call func_X__impl with the caller's r0-r3 and 16 stack words,
-# return the first argument (kept in r4)
+# return the first argument (kept in r4). Except functions that return a float or double: on the 3DS
+# (hard float) `this` stays in r0 while the result is in s0, and the i386 thunk keeps both (eax /
+# x87), but the Android ABI (softfp) returns floats in r0 too, so the thunk replaced the result with
+# the pointer: every sound voice got a garbage volume (loud static) and float getters returned
+# garbage (README: Android stop A9). Those get a plain tail branch to the impl.
 llvm-nm --defined-only --format=just-symbols "${NATIVE[@]}" | sort -u > $A/native_defs.txt
+python3 - > $A/float_ret.txt <<'PY'
+import json, os, re
+jobs = {}
+for p, a in json.load(open('decomp/jobs.json')):
+    for x in (a or []): jobs[x] = p
+for a in json.load(open('decomp/returns_this.json')) + (json.load(open('native/returns_this3.json')) if os.path.exists('native/returns_this3.json') else []):
+    p = jobs.get(a)
+    if not p or not os.path.exists(os.path.join('decomp/src', p)): continue
+    t = open(os.path.join('decomp/src', p), errors='ignore').read()
+    if re.search(r'(^|\n)\s*(static\s+)?(inline\s+)?(float|double|f32|f64)\s+[\w:<>]*\b\w+\s*\([^;{]*\)\s*(const\s*)?\{', t):
+        print('func_' + a.upper())
+PY
+echo "link_android: $(sort -u $A/float_ret.txt | wc -l) float-returning returns-this functions: tail branch, no thunk"
 llvm-nm --defined-only --format=just-symbols $A/albw_game.o | grep '__impl$' | sort -u | python3 -c "
 import sys
 native = set(open('$A/native_defs.txt').read().split())
+fret = set(open('$A/float_ret.txt').read().split())
 out = ['.syntax unified', '.text', '.arm']
 for impl in sys.stdin.read().split():
     f = impl[:-len('__impl')]
     if f in native: continue
+    if f in fret:
+        out += ['.globl %s' % f, '.type %s,%%function' % f, '.p2align 2', '%s:' % f, '  b %s' % impl]
+        continue
     out += ['.globl %s' % f, '.type %s,%%function' % f, '.p2align 2', '%s:' % f,
             '  push {r4, lr}', '  mov r4, r0', '  sub sp, sp, #64', '  add ip, sp, #72']
     for k in range(0, 64, 4):
@@ -148,10 +176,15 @@ NAMES=($(python3 tools/gen_names.py native/names.txt $A/defined_syms.txt))
 OUTDIR=$A/jniLibs/armeabi-v7a
 mkdir -p $OUTDIR
 OUT=$OUTDIR/libmain.so
-clang $TARGET -shared -fPIC -o $OUT "${NATIVE[@]}" $A/native/stubs.o $A/albw_game.o \
+clang $TARGET -shared -fPIC "${SANFLAGS[@]}" -o $OUT "${NATIVE[@]}" $A/native/stubs.o $A/albw_game.o \
     -L$SDLP/lib -lSDL3 -lz -lm -ldl -llog -landroid \
     -Wl,-soname,libmain.so -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-z,max-page-size=16384 \
     "${NAMES[@]}" -Wl,-Map=$A/libmain.map
 cp $SDLP/lib/libSDL3.so $OUTDIR/
+if [[ -n $UBSAN ]]; then
+    cp "$(ls $TC/lib/clang/*/lib/linux/libclang_rt.ubsan_standalone-arm-android.so | head -1)" $OUTDIR/
+    # Gradle packages build/android/jniLibs: point it at this build with -PjniLibs=$OUTDIR/.. or copy
+    echo "link_android: UBSan build in $A/jniLibs (install: rsync it over build/android/jniLibs, or -PgameLibs=$A/jniLibs)"
+fi
 python3 tools/gen_ssmap.py $A/libmain.map $OUT > $A/libmain.ssmap 2>/dev/null || echo "link_android: gen_ssmap failed (save states unavailable)"
 echo "linked $OUT ($(du -h $OUT | cut -f1))"
