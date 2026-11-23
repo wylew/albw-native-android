@@ -1373,10 +1373,34 @@ static const uint8_t LOGIC[16] = {0x0, 0x1, 0x2, 0x3, 0xF, 0xC, 0x5, 0xA, 0xE, 0
 
 static void apply_frag(void) {
     const RFragState *f = &R.frag;
+    unsigned cmask = f->color_mask;
     if (f->logic_enable) {
         glDisable(GL_BLEND);
+#if defined(__ANDROID__)
+        /* GLES has no logic ops: the ones with an exact equivalent. NOOP (PICA 6) is what the
+         * stencil shadow volumes use (mark the stencil, keep the colour): drawn as colour, they were
+         * the solid black blobs under characters and signs (README: Android stop A10) */
+        switch (f->logic_op & 15) {
+        case 6: cmask = 0; break;                                  /* noop: no colour write */
+        case 3: break;                                             /* copy: plain write */
+        case 0:                                                    /* clear: 0 */
+            glEnable(GL_BLEND);
+            rglBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+            rglBlendFuncSeparate(GL_ZERO, GL_ZERO, GL_ZERO, GL_ZERO);
+            break;
+        default: {
+            static unsigned warned;
+            if (!(warned >> (f->logic_op & 15) & 1)) {
+                warned |= 1u << (f->logic_op & 15);
+                rlog("GL: logic op %d has no GLES equivalent here: drawn as copy", f->logic_op & 15);
+            }
+            break;
+        }
+        }
+#else
         glEnable(GL_COLOR_LOGIC_OP);
         rglLogicOp(GL_CLEAR + LOGIC[f->logic_op & 15]);
+#endif
     } else {
         glDisable(GL_COLOR_LOGIC_OP);
         if (f->blend_enable) {
@@ -1397,7 +1421,7 @@ static void apply_frag(void) {
         glDisable(GL_DEPTH_TEST);
     }
     glDepthMask(f->depth_write ? GL_TRUE : GL_FALSE);
-    rglColorMask(f->color_mask & 1, f->color_mask >> 1 & 1, f->color_mask >> 2 & 1, f->color_mask >> 3 & 1);
+    rglColorMask(cmask & 1, cmask >> 1 & 1, cmask >> 2 & 1, cmask >> 3 & 1);
     if (f->stencil_test) {
         glEnable(GL_STENCIL_TEST);
         rglStencilFunc(TESTF[f->stencil_func & 7], f->stencil_ref, f->stencil_mask);
