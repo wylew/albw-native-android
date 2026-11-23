@@ -395,6 +395,11 @@ int plat_init(const char *title, const PlatConfig *c) {
     glGenVertexArrays(1, &blit_vao);
     /* separate: the bottom screen's window (shares ctx); sets the swap intervals in both modes */
     plat_set_windows(g_separate, 0);
+#if defined(__ANDROID__)
+    /* Android: a full-screen window is what makes SDLActivity hide the status and navigation bars
+     * (immersive mode); otherwise the system bars stay over the game */
+    SDL_SetWindowFullscreen(win, true);
+#endif
     if (g_gamescope) {
         SDL_SetWindowFullscreen(win, true);
         fprintf(stderr, "platform: gamescope / Steam Deck Game Mode: one full-screen window; "
