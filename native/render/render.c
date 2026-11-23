@@ -2380,7 +2380,17 @@ static size_t op_len(const ROp *op) {
     default: return sizeof *op;   /* ROP_FL and anything new: the whole op */
     }
 }
-static uint64_t op_hash(const ROp *op) { return hash_bytes(op, op_len(op)) | 1; }
+/* hash_bytes multiplies (FNV style), so its low bits depend only on the inputs' low bits, and the
+ * pool table is indexed by the low bits: ops differing in their upper bits (addresses, floats)
+ * piled into a few buckets. During gameplay on the RP5 the linear probing in pool_put took 84% of
+ * the game thread (README: Android performance). fmix64 (MurmurHash3) spreads every bit. */
+static uint64_t fmix64(uint64_t k) {
+    k ^= k >> 33; k *= 0xff51afd7ed558ccdull;
+    k ^= k >> 33; k *= 0xc4ceb9fe1a85ec53ull;
+    k ^= k >> 33;
+    return k;
+}
+static uint64_t op_hash(const ROp *op) { return fmix64(hash_bytes(op, op_len(op))) | 1; }
 
 /* marker token: slot + 1 (never 0) | generation << 20 | 4-bit check << 28 */
 static uint32_t token_of(uint32_t slot, uint8_t gen) {
