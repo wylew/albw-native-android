@@ -105,6 +105,10 @@ void fraglight_locations(unsigned prog, FLLoc *loc);
 /* uploads the state if it changed since this program last got it; binds the LUT texture on
  * texture unit `unit` */
 void fraglight_upload(FLLoc *loc, int unit);
+/* specialised programs (render.c): the lighting configuration as 4 key words, and the GLSL of the
+ * uniforms, LUT helpers and an fl_compute with that configuration baked in (malloc'd) */
+void fraglight_spec_key(uint32_t k[4]);
+char *fraglight_spec_glsl(const uint32_t k[4]);
 
 /* debugging */
 const FLEnv *fraglight_env(void);

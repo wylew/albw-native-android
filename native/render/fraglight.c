@@ -449,6 +449,109 @@ static void upload_rows(void) {
     S.rows_dirty = false;
 }
 
+/* ================================================================== specialised lighting GLSL
+ * The configuration the generic fl_compute reads from uniforms (light count, enabled LUTs, input
+ * selectors, absolute-input flags, fresnel / clamp / bump mode, per-light flags and LUT ids) as 4
+ * key words, and an fl_compute with them baked in (render.c specialised programs; README: Android
+ * performance: the generic loop was about half of the GPU time left). Values (colours, positions,
+ * scales, spot / attenuation parameters, LUT rows) stay uniforms. Same maths as RENDER_FS_FRAGLIGHT. */
+void fraglight_spec_key(uint32_t k[4]) {
+    const FLEnv *e = &S.env;
+    int n = e->enable ? (e->nlights ? e->nlights : 1) : 0;
+    if (n > 8) n = 8;
+    int luts = config_luts(e->config);
+    static const int off_bit[6] = {FLI_D0, FLI_D1, FLI_FR, FLI_RR, FLI_RG, FLI_RB};
+    for (int i = 0; i < 6; i++)
+        if (e->lut_off >> i & 1) luts &= ~(1 << off_bit[i]);
+    uint32_t cz = (uint32_t)((e->fresnel_sel & 3) | (e->clamp_highlights ? 4 : 0) | (e->bump_mode & 3) << 4 |
+                             (e->bump_sel & 3) << 6 | (e->bump_renorm ? 1 << 8 : 0));
+    k[0] = (uint32_t)n | (uint32_t)(luts & 0xFF) << 4 | (uint32_t)(S.in.abs & 0xFF) << 12 | cz << 20;
+    k[1] = 0;
+    for (int i = 0; i < FLI_COUNT; i++) k[1] |= (uint32_t)(S.in.sel[i] & 7) << (3 * i);
+    k[2] = k[3] = 0;
+    for (int j = 0; j < n; j++) {
+        int id = e->perm[j] & 7;
+        const LightState *l = &S.light[id];
+        int f = (l->two_sided ? 1 : 0) | (l->geo0 ? 2 : 0) | (l->geo1 ? 4 : 0) |
+                ((e->spot_mask >> id & 1) && (luts >> FLI_SP & 1) ? 8 : 0) | (e->da_mask >> id & 1 ? 16 : 0);
+        uint32_t w = (uint32_t)(f | id << 5) & 0xFF;
+        if (j < 4) k[2] |= w << (8 * j); else k[3] |= w << (8 * (j - 4));
+    }
+}
+
+static void fl_lookup_expr(char *o, size_t n, int i, const char *id, uint32_t sel, uint32_t abs) {
+    static const char *x[6] = {"dot(N, h)", "dot(V, h)", "dot(N, V)", "dot(L, N)", "dot(L, S.xyz)", "dot(h - N * dot(N, h), T)"};
+    int s = (int)(sel >> (3 * i) & 7);
+    const char *xe = x[s < 5 ? s : 5];
+    if (abs >> i & 1) snprintf(o, n, "(fl_lut_u(%s, abs(%s)) * fl_scale[%d][%d])", id, xe, i / 4, i % 4);
+    else snprintf(o, n, "(fl_lut_s(%s, %s) * fl_scale[%d][%d])", id, xe, i / 4, i % 4);
+}
+
+/* GLSL: uniforms + helpers + a specialised fl_compute for key k (malloc'd) */
+char *fraglight_spec_glsl(const uint32_t k[4]) {
+    size_t cap = 24576;
+    char *s = xrealloc(NULL, cap);
+    size_t len = 0;
+#define E(...) do { len += (size_t)snprintf(s + len, cap - len, __VA_ARGS__); } while (0)
+    /* the header of RENDER_FS_FRAGLIGHT up to fl_lookup (uniforms, LUT helpers) */
+    const char *full = RENDER_FS_FRAGLIGHT, *cut = strstr(full, "/* LUT"), *cut2 = strstr(full, "float fl_lookup(");
+    const char *end = cut2 ? cut2 : (cut ? cut : full + strlen(full));
+    E("%.*s", (int)(end - full), full);
+    int n = (int)(k[0] & 15), luts = (int)(k[0] >> 4 & 0xFF);
+    uint32_t abs = k[0] >> 12 & 0xFF, cz = k[0] >> 20 & 0x1FF, sel = k[1];
+    E("void fl_compute(vec4 t0, vec4 t1, vec4 t2, out vec4 prim, out vec4 sec){\n  prim = vec4(0.0); sec = vec4(0.0);\n");
+    if (n == 0) { E("}\n"); return s; }
+    E("  vec3 N = normalize(v_normal), V = normalize(v_view);\n"
+      "  vec3 T = v_tangent - N * dot(N, v_tangent), B;\n"
+      "  if (dot(T, T) < 1e-8) {\n"
+      "    float k = 1.0 + N.z;\n"
+      "    if (k > 1e-4) {\n"
+      "      T = vec3(-N.z - N.y * N.y / k, N.x * N.y / k, N.x);\n"
+      "      B = vec3(N.x * N.y / k, -N.z - N.x * N.x / k, N.y);\n"
+      "    } else { T = vec3(1.0, 0.0, 0.0); B = vec3(0.0, -1.0, 0.0); }\n"
+      "  } else {\n    T = normalize(T); B = cross(N, T);\n  }\n");
+    int bm = (int)(cz >> 4 & 3), bs = (int)(cz >> 6 & 3), renorm = (int)(cz >> 8 & 1), fsel = (int)(cz & 3), clamp_hl = (int)(cz >> 2 & 1);
+    if (bm) {
+        E("  {\n    vec3 p = %s.rgb * 2.0 - 1.0;\n", bs == 0 ? "t0" : bs == 1 ? "t1" : "t2");
+        if (renorm) E("    p.z = sqrt(max(1.0 - p.x * p.x - p.y * p.y, 0.0));\n");
+        E("    vec3 q = normalize(T * p.x + B * p.y + N * p.z);\n    %s = q;\n  }\n", bm == 1 ? "N" : "T");
+    }
+    E("  vec3 dsum = vec3(0.0), ssum = vec3(0.0); float pa = 1.0, sa = 1.0;\n");
+    for (int j = 0; j < n; j++) {
+        uint32_t w = (j < 4 ? k[2] >> (8 * j) : k[3] >> (8 * (j - 4))) & 0xFF;
+        int f = (int)(w & 31), id = (int)(w >> 5 & 7);
+        char lk[512], idb[16];
+        E("  {\n    vec4 P = fl_l[%d], S = fl_l[%d], D = fl_l[%d];\n", j * 7 + 4, j * 7 + 5, j * 7 + 6);
+        E("    vec3 L = normalize(P.w != 0.0 ? P.xyz : P.xyz + v_view);\n    vec3 H = V + L; vec3 h = normalize(H);\n");
+        E("    float ln = dot(L, N);\n    float dp = %s;\n", (f & 1) ? "abs(ln)" : "max(ln, 0.0)");
+        E("    float chl = %s;\n", clamp_hl ? "sign(dp)" : "1.0");
+        if (f & 16) { snprintf(idb, sizeof idb, "%d", 16 + id); E("    float da = fl_lut_u(%s, D.x * length(P.xyz + v_view) + D.y);\n", idb); }
+        else E("    float da = 1.0;\n");
+        if (f & 8) { snprintf(idb, sizeof idb, "%d", 8 + id); fl_lookup_expr(lk, sizeof lk, 2, idb, sel, abs); E("    float sp = %s;\n", lk); }
+        else E("    float sp = 1.0;\n");
+        if (f & 6) E("    float hh = dot(H, H); float geo = hh == 0.0 ? 0.0 : min(dp / hh, 1.0);\n");
+        if (luts >> 0 & 1) { fl_lookup_expr(lk, sizeof lk, 0, "0", sel, abs); E("    float d0 = %s;\n", lk); } else E("    float d0 = 1.0;\n");
+        E("    vec3 s0 = d0 * fl_l[%d].rgb%s;\n", j * 7 + 2, (f & 2) ? " * geo" : "");
+        E("    vec3 refl = vec3(1.0);\n");
+        if (luts >> 6 & 1) { fl_lookup_expr(lk, sizeof lk, 6, "6", sel, abs); E("    refl.r = %s;\n", lk); }
+        if (luts >> 5 & 1) { fl_lookup_expr(lk, sizeof lk, 5, "5", sel, abs); E("    refl.g = %s;\n", lk); } else E("    refl.g = refl.r;\n");
+        if (luts >> 4 & 1) { fl_lookup_expr(lk, sizeof lk, 4, "4", sel, abs); E("    refl.b = %s;\n", lk); } else E("    refl.b = refl.r;\n");
+        if (luts >> 1 & 1) { fl_lookup_expr(lk, sizeof lk, 1, "1", sel, abs); E("    float d1 = %s;\n", lk); } else E("    float d1 = 1.0;\n");
+        E("    vec3 s1 = d1 * refl * fl_l[%d].rgb%s;\n", j * 7 + 3, (f & 4) ? " * geo" : "");
+        if ((luts >> 3 & 1) && j == n - 1 && fsel) {
+            fl_lookup_expr(lk, sizeof lk, 3, "3", sel, abs);
+            E("    float fr = %s;\n", lk);
+            if (fsel & 1) E("    pa = fr;\n");
+            if (fsel & 2) E("    sa = fr;\n");
+        }
+        E("    dsum += (fl_l[%d].rgb * dp + fl_l[%d].rgb) * da * sp;\n    ssum += (s0 + s1) * chl * da * sp;\n  }\n", j * 7, j * 7 + 1);
+    }
+    E("  dsum += fl_amb.rgb;\n  prim = clamp(vec4(dsum, pa), 0.0, 1.0); sec = clamp(vec4(ssum, sa), 0.0, 1.0);\n}\n");
+#undef E
+    if (len >= cap) { fprintf(stderr, "fraglight: specialised GLSL too long\n"); abort(); }
+    return s;
+}
+
 void fraglight_upload(FLLoc *loc, int unit) {
     if (loc->cfg < 0) return;
     glActiveTexture(GL_TEXTURE0 + (GLenum)unit);

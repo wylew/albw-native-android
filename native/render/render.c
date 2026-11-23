@@ -1593,7 +1593,7 @@ void render_set_tev_stages(int mask, const RTev *t, int flags) {
  * maths as FS_TEV, constants instead of selections), compiled on first use and cached. Colours,
  * constants, the alpha reference and fog colour stay uniforms. ALBW_SPEC_SHADERS=0: generic
  * program (the default on the PC, where the GPU copes; =1 to enable there). */
-#define SPEC_KEY_WORDS 30
+#define SPEC_KEY_WORDS 32   /* 0-27 combiner / texture / alpha / fog, 28-31 lighting (fraglight_spec_key) */
 typedef struct SpecEnt { uint32_t key[SPEC_KEY_WORDS]; const Program *base; Program prog; struct UniShadow_ ush; struct SpecEnt *next; } SpecEnt;
 static SpecEnt *g_spec_tab[1024];
 static unsigned g_spec_count;
@@ -1635,6 +1635,7 @@ static void spec_key(uint32_t *k) {
     int fog_on = R.fog.mode == 5 && !(&g_dbg_fog_off && g_dbg_fog_off) && fog_bind();
     k[27] = (uint32_t)(fog_on ? 1 : 0) | (uint32_t)(R.fog.flip ? 1 : 0) << 1;
 }
+static void spec_key_fl(uint32_t *k) { fraglight_spec_key(k + 28); }
 
 static void spec_src(char *o, size_t n, int s, int stage) {
     switch (s & 15) {
@@ -1686,11 +1687,13 @@ static void spec_cmb(char *o, size_t n, int c, const char *a, const char *b, con
 }
 
 static char *fs_source_spec(bool fl, const uint32_t *k) {
-    size_t cap = 16384 + strlen(FS_HEAD) + strlen(RENDER_FS_FRAGLIGHT);
+    char *flsrc = fl ? fraglight_spec_glsl(k + 28) : NULL;   /* lighting with its configuration baked in */
+    size_t cap = 16384 + strlen(FS_HEAD) + (flsrc ? strlen(flsrc) : 0);
     char *s = xrealloc(NULL, cap);
     size_t len = (size_t)snprintf(s, cap, "#version 330 core\n#define FL %d\n#define DBGOUT 0\n%s%s"
         "vec4 t0 = vec4(0.0), t1 = vec4(0.0), t2 = vec4(0.0), fprim = vec4(0.0), fsec = vec4(0.0);\n"
-        "void main(){\n  vec4 vc = clamp(v_color, 0.0, 1.0);\n", fl ? 1 : 0, FS_HEAD, fl ? RENDER_FS_FRAGLIGHT : "");
+        "void main(){\n  vec4 vc = clamp(v_color, 0.0, 1.0);\n", fl ? 1 : 0, FS_HEAD, flsrc ? flsrc : "");
+    free(flsrc);
 #define EMIT(...) do { len += (size_t)snprintf(s + len, cap - len, __VA_ARGS__); } while (0)
     int en = (int)(k[26] & 7), t2tc1 = (int)(k[26] >> 3 & 1), t0type = (int)(k[26] >> 4 & 3);
     if (en & 1) EMIT(t0type == 1 ? "  t0 = texture(texcube0, v_tc0.xyz);\n" : t0type == 2 ? "  t0 = textureProj(tex0, v_tc0.xyw);\n" : "  t0 = texture(tex0, v_tc0.xy);\n");
@@ -1743,6 +1746,7 @@ static Program *spec_program(Program *base) {
     if (!spec_enabled() || !base->vs_src) return base;
     uint32_t k[SPEC_KEY_WORDS];
     spec_key(k);
+    if (base->fl) spec_key_fl(k);
     uint32_t h = 2166136261u ^ (uint32_t)(uintptr_t)base;
     for (int i = 0; i < SPEC_KEY_WORDS; i++) h = (h ^ k[i]) * 16777619u;
     SpecEnt **slot = &g_spec_tab[h % 1024];
