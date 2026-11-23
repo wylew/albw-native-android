@@ -100,7 +100,7 @@ int fraglight_import(const void *in, size_t n);
 extern const char RENDER_FS_FRAGLIGHT[];
 
 /* per-program uniform locations + upload (render.c) */
-typedef struct { int cfg, in0, scale, amb, light, lut; uint32_t gen; } FLLoc;
+typedef struct { int cfg, in0, scale, amb, light, lut, row; uint32_t gen; } FLLoc;
 void fraglight_locations(unsigned prog, FLLoc *loc);
 /* uploads the state if it changed since this program last got it; binds the LUT texture on
  * texture unit `unit` */

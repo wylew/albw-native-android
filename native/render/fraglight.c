@@ -18,7 +18,12 @@
  *                    (position | direction, directional), (spot direction, flags: 1 two-sided
  *                    diffuse, 2 geometric factor 0, 4 geometric factor 1, 8 spot, 16 distance
  *                    attenuation), (distance scale, distance bias, light id)
- *           fl_lut   256 x 24 RG32F: row = LUT id, (value, delta to the next entry)
+ *           fl_lut   256 x (registered LUTs + 1) RG32F atlas: row 0 zeros, row h = registry handle h,
+ *                    (value, delta to the next entry); uploaded only when the registry changes
+ *           fl_row   [24]: LUT id -> atlas row (the bound handle), sent with the other uniforms.
+ *                    (Before: one row per LUT id, re-uploaded with glTexSubImage2D whenever a draw
+ *                    bound other LUTs: ~16% of the GL thread's CPU on Android plus driver stalls,
+ *                    as the texture was still in use by queued draws.)
  * Per light (slot k, light id i): L = normalize(directional ? P : P + V), H = normalize(V) + L,
  *   dot = two-sided ? |L.N| : max(L.N, 0); distance attenuation DA_i(clamp(scale |P + V| + bias));
  *   spot SP_i(input); geometric factor min(dot / H.H, 1); D0, D1, RR/RG/RB (RG/RB default to RR),
@@ -47,18 +52,18 @@
 const char RENDER_FS_FRAGLIGHT[] =
     "in vec3 v_tangent;\n"
     "uniform ivec4 fl_cfg; uniform ivec4 fl_in[2]; uniform vec4 fl_scale[2]; uniform vec4 fl_amb;\n"
-    "uniform vec4 fl_l[56]; uniform sampler2D fl_lut;\n"
+    "uniform vec4 fl_l[56]; uniform sampler2D fl_lut; uniform int fl_row[24];\n"
     "int fl_sel(int i){ return i < 4 ? fl_in[0][i] : fl_in[1][i - 4]; }\n"
     "float fl_sc(int i){ return i < 4 ? fl_scale[0][i] : fl_scale[1][i - 4]; }\n"
     "bool fl_on(int i){ return ((fl_cfg.y >> i) & 1) != 0; }\n"
     "float fl_lut_u(int id, float x){\n"
     "  x = clamp(x, 0.0, 1.0) * 256.0; int i = min(int(x), 255);\n"
-    "  vec2 e = texelFetch(fl_lut, ivec2(i, id), 0).rg; return e.r + e.g * (x - float(i));\n"
+    "  vec2 e = texelFetch(fl_lut, ivec2(i, fl_row[id]), 0).rg; return e.r + e.g * (x - float(i));\n"
     "}\n"
     "float fl_lut_s(int id, float x){\n"
     "  x = clamp(x, -1.0, 1.0) * 128.0; int i = clamp(int(floor(x)), -128, 127); float d = x - float(i);\n"
     "  if (i < 0) i += 256;\n"
-    "  vec2 e = texelFetch(fl_lut, ivec2(i, id), 0).rg; return e.r + e.g * d;\n"
+    "  vec2 e = texelFetch(fl_lut, ivec2(i, fl_row[id]), 0).rg; return e.r + e.g * d;\n"
     "}\n"
     /* LUT `i` (FLI_*) of PICA id `id` for the input it selects */
     "float fl_lookup(int i, int id, vec3 N, vec3 V, vec3 L, vec3 H, vec3 T, vec3 S){\n"
@@ -135,6 +140,7 @@ const char RENDER_FS_FRAGLIGHT[] =
 #define GL_RG32F_ 0x8230
 #define GL_RG_ 0x8227
 static void (*pUniform4iv)(GLint, GLsizei, const GLint *);
+static void (*pUniform1iv)(GLint, GLsizei, const GLint *);
 
 /* ================================================================== LUT registry (load time) */
 
@@ -260,7 +266,8 @@ static struct {
     uint32_t bound[24];      /* LUT id -> registry handle */
     uint32_t gen;            /* state generation (uniform upload) */
     uint32_t lut_gen_up;     /* g_lut_gen at the last texture upload */
-    uint32_t tex_bound[24];  /* handles in the texture rows */
+    uint32_t tex_bound[24];  /* (unused since the atlas) */
+    uint32_t atlas_rows;     /* rows in the LUT atlas (registry handles below it are valid) */
     bool rows_dirty;
     GLuint tex;
 } S;
@@ -382,6 +389,8 @@ void fraglight_locations(unsigned prog, FLLoc *loc) {
     loc->amb = glGetUniformLocation(prog, "fl_amb");
     loc->light = glGetUniformLocation(prog, "fl_l");
     loc->lut = glGetUniformLocation(prog, "fl_lut");
+    loc->row = glGetUniformLocation(prog, "fl_row");
+    if (!pUniform1iv) pUniform1iv = (void (*)(GLint, GLsizei, const GLint *))SDL_GL_GetProcAddress("glUniform1iv");
     loc->gen = 0;
 }
 
@@ -407,27 +416,33 @@ static int config_luts(int c) {
 }
 
 static void upload_rows(void) {
+    /* the whole LUT registry as one atlas (rows: 0 = zeros, h = handle h); rebuilt when it changes */
+    static GLint max_rows;
+    if (!max_rows) { glGetIntegerv(0x0D33 /* GL_MAX_TEXTURE_SIZE */, &max_rows); if (max_rows < 64) max_rows = 64; }
     if (!S.tex) {
         glGenTextures(1, &S.tex);
         glBindTexture(GL_TEXTURE_2D, S.tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F_, 256, 24, 0, GL_RG_, GL_FLOAT, NULL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        for (int i = 0; i < 24; i++) S.tex_bound[i] = 0xFFFFFFFFu;
     } else {
         glBindTexture(GL_TEXTURE_2D, S.tex);
     }
-    static float zero[256][2];
-    bool all = S.lut_gen_up != g_lut_gen;
     pthread_mutex_lock(&g_mx);
-    for (int i = 0; i < 24; i++) {
-        uint32_t h = S.bound[i];
-        if (!all && S.tex_bound[i] == h) continue;
-        const float(*src)[2] = h && h <= g_nlut ? (const float(*)[2])g_lut[h - 1].e : (const float(*)[2])zero;
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, i, 256, 1, GL_RG_, GL_FLOAT, src);
-        S.tex_bound[i] = h;
+    uint32_t rows = g_nlut + 1;
+    if (rows > (uint32_t)max_rows) {
+        static int warned;
+        if (!warned++) fprintf(stderr, "fraglight: %u LUTs, the atlas holds %d: the rest read as 0\n", g_nlut, max_rows - 1);
+        rows = (uint32_t)max_rows;
+    }
+    float (*buf)[2] = calloc((size_t)rows * 256, sizeof *buf);
+    if (buf) {
+        for (uint32_t h = 1; h < rows; h++) memcpy(buf + (size_t)h * 256, g_lut[h - 1].e, sizeof g_lut[h - 1].e);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F_, 256, (GLsizei)rows, 0, GL_RG_, GL_FLOAT, buf);
+        free(buf);
+        S.atlas_rows = rows;
+        S.gen++;   /* the row uniforms depend on the atlas size: every program re-sends them */
     }
     S.lut_gen_up = g_lut_gen;
     pthread_mutex_unlock(&g_mx);
@@ -437,7 +452,7 @@ static void upload_rows(void) {
 void fraglight_upload(FLLoc *loc, int unit) {
     if (loc->cfg < 0) return;
     glActiveTexture(GL_TEXTURE0 + (GLenum)unit);
-    if (S.rows_dirty || !S.tex || S.lut_gen_up != g_lut_gen) upload_rows();
+    if (!S.tex || S.lut_gen_up != g_lut_gen) upload_rows();
     else glBindTexture(GL_TEXTURE_2D, S.tex);
     glActiveTexture(GL_TEXTURE0);
     if (loc->gen == S.gen && loc->gen) return;
@@ -455,6 +470,11 @@ void fraglight_upload(FLLoc *loc, int unit) {
                         (e->bump_sel & 3) << 6 | (e->bump_renorm ? 1 << 8 : 0),
                     S.in.abs};
     pUniform4iv(loc->cfg, 1, cfg);
+    if (loc->row >= 0 && pUniform1iv) {
+        GLint row[24];
+        for (int i = 0; i < 24; i++) row[i] = S.bound[i] < S.atlas_rows ? (GLint)S.bound[i] : 0;
+        pUniform1iv(loc->row, 24, row);
+    }
     GLint in[8] = {0};
     float sc[8] = {0};
     for (int i = 0; i < FLI_COUNT; i++) { in[i] = S.in.sel[i] & 7; sc[i] = scale_of(S.in.scale[i]); }

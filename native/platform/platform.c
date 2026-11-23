@@ -1660,6 +1660,30 @@ void plat_end_frame(void) {
         if (next_frame_ns > now) SDL_DelayNS(next_frame_ns - now);
         else if (now - next_frame_ns > 100000000ull) next_frame_ns = now;
     } else next_frame_ns = now;
+    {   /* ALBW_FPS_LOG=1 (default on Android: no window title): presented frames per second to the
+         * log every 2 s, with the process CPU time used meanwhile (all threads) */
+        static int on = -1; static uint64_t t0, c0; static int n;
+        if (on < 0) {
+            const char *e = getenv("ALBW_FPS_LOG");
+#if defined(__ANDROID__)
+            on = !e || strcmp(e, "0");
+#else
+            on = e && strcmp(e, "0");
+#endif
+        }
+        if (on) {
+            struct timespec ct;
+            clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ct);
+            uint64_t c = (uint64_t)ct.tv_sec * 1000000000ull + (uint64_t)ct.tv_nsec, t = plat_ticks_ns();
+            if (!t0) { t0 = t; c0 = c; }
+            n++;
+            if (t - t0 >= 2000000000ull) {
+                fprintf(stderr, "fps: %.1f (%.1f ms/frame, process CPU %.0f%% of one core)\n", n * 1e9 / (double)(t - t0),
+                        (double)(t - t0) / 1e6 / n, 100.0 * (double)(c - c0) / (double)(t - t0));
+                t0 = t; c0 = c; n = 0;
+            }
+        }
+    }
     {   /* Debug > Show FPS: game frames per second in the window title, updated twice a second */
         static uint64_t t0; static int n, shown;
         n++;

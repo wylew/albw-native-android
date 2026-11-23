@@ -1821,14 +1821,73 @@ static void upload_uniforms(Program *p) {
     R.vsf_dirty = R.tev_dirty = false;
 }
 
-/* append to a streaming buffer, orphaning it when full; returns the offset */
+/* append to a streaming buffer, orphaning it when full; returns the offset.
+ * Written through glMapBufferRange(UNSYNCHRONIZED): each draw's data goes to a range no queued draw
+ * uses (the ring only wraps after an invalidate of the whole buffer), but a driver cannot know that
+ * for glBufferSubData, and Adreno waited for the GPU on every call: ~48% of the GL thread's time and
+ * 17 fps on the title screen (README: Android performance). Adreno waits for UNSYNCHRONIZED maps too,
+ * so Android uses the buffer pool below (60 fps). */
+#define GL_MAP_WRITE_BIT_ 0x0002
+#define GL_MAP_INVALIDATE_RANGE_BIT_ 0x0004
+#define GL_MAP_INVALIDATE_BUFFER_BIT_ 0x0008
+#define GL_MAP_UNSYNCHRONIZED_BIT_ 0x0020
+/* ALBW_STREAM_MODE: 2 (Android default) a pool of buffer objects, each draw's data re-specified with
+ * glBufferData into the next one (the driver gives a busy buffer new storage instead of waiting:
+ * Adreno waited even for UNSYNCHRONIZED maps of a buffer queued draws use); 1 the ring through
+ * glMapBufferRange(UNSYNCHRONIZED); 0 (PC default) the ring through glBufferSubData. Pool mode returns offset 0
+ * and leaves the buffer it used bound to `target`. */
+#define STREAM_POOL 512
+static int stream_mode(void) {
+    static int m = -1;
+    if (m < 0) {
+        const char *e = getenv("ALBW_STREAM_MODE");
+#if defined(__ANDROID__)
+        m = e ? atoi(e) : 2;
+#else
+        m = e ? atoi(e) : 0;   /* the PC drivers (Mesa) handle the ring; pool mode untested there */
+#endif
+        if (getenv("ALBW_STREAM_SUBDATA")) m = 0;
+    }
+    return m;
+}
 static size_t stream(GLenum target, GLuint buf, size_t *off, size_t cap, const void *data, size_t n) {
+    static void *(*map)(GLenum, GLintptr, GLsizeiptr, GLbitfield);
+    static GLboolean (*unmap)(GLenum);
+    static int mode = -1;   /* 2 pool, 1 map, 0 subdata */
+    if (mode < 0) {
+        map = (void *(*)(GLenum, GLintptr, GLsizeiptr, GLbitfield))SDL_GL_GetProcAddress("glMapBufferRange");
+        unmap = (GLboolean (*)(GLenum))SDL_GL_GetProcAddress("glUnmapBuffer");
+        mode = stream_mode();
+        if (mode == 1 && !(map && unmap)) mode = 0;
+    }
+    if (mode == 2) {
+        static GLuint pool[2][STREAM_POOL];
+        static unsigned next[2];
+        int k = target == GL_ARRAY_BUFFER ? 0 : 1;
+        if (!pool[k][0]) glGenBuffers(STREAM_POOL, pool[k]);
+        GLuint b = pool[k][next[k]++ % STREAM_POOL];
+        glBindBuffer(target, b);
+        glBufferData(target, (GLsizeiptr)(n ? n : 16), data, GL_STREAM_DRAW);
+        (void)buf; (void)off; (void)cap;
+        return 0;
+    }
     glBindBuffer(target, buf);
     size_t o = (*off + 15) & ~(size_t)15;
-    if (o + n > cap) {
-        glBufferData(target, (GLsizeiptr)cap, NULL, GL_STREAM_DRAW);
-        o = 0;
+    bool wrap = o + n > cap;
+    if (wrap) o = 0;
+    if (mode == 1 && n) {
+        GLbitfield fl = GL_MAP_WRITE_BIT_ | (wrap ? GL_MAP_INVALIDATE_BUFFER_BIT_ : GL_MAP_UNSYNCHRONIZED_BIT_ | GL_MAP_INVALIDATE_RANGE_BIT_);
+        void *m = map(target, (GLintptr)o, (GLsizeiptr)n, fl);
+        if (m) {
+            memcpy(m, data, n);
+            unmap(target);
+            *off = o + n;
+            return o;
+        }
+        WARN_ONCE("glMapBufferRange failed: streaming with glBufferSubData");
+        mode = 0;
     }
+    if (wrap) glBufferData(target, (GLsizeiptr)cap, NULL, GL_STREAM_DRAW);
     glBufferSubData(target, (GLintptr)o, (GLsizeiptr)n, data);
     *off = o + n;
     return o;
