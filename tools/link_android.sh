@@ -131,18 +131,7 @@ llvm-objcopy --remove-section=.init_array --remove-section=.rel.init_array \
 # the pointer: every sound voice got a garbage volume (loud static) and float getters returned
 # garbage (README: Android stop A9). Those get a plain tail branch to the impl.
 llvm-nm --defined-only --format=just-symbols "${NATIVE[@]}" | sort -u > $A/native_defs.txt
-python3 - > $A/float_ret.txt <<'PY'
-import json, os, re
-jobs = {}
-for p, a in json.load(open('decomp/jobs.json')):
-    for x in (a or []): jobs[x] = p
-for a in json.load(open('decomp/returns_this.json')) + (json.load(open('native/returns_this3.json')) if os.path.exists('native/returns_this3.json') else []):
-    p = jobs.get(a)
-    if not p or not os.path.exists(os.path.join('decomp/src', p)): continue
-    t = open(os.path.join('decomp/src', p), errors='ignore').read()
-    if re.search(r'(^|\n)\s*(static\s+)?(inline\s+)?(float|double|f32|f64)\s+[\w:<>]*\b\w+\s*\([^;{]*\)\s*(const\s*)?\{', t):
-        print('func_' + a.upper())
-PY
+python3 tools/float_ret_arm.py > $A/float_ret.txt   # exact: return types from LLVM IR (cached)
 echo "link_android: $(sort -u $A/float_ret.txt | wc -l) float-returning returns-this functions: tail branch, no thunk"
 llvm-nm --defined-only --format=just-symbols $A/albw_game.o | grep '__impl$' | sort -u | python3 -c "
 import sys

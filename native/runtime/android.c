@@ -128,6 +128,8 @@ int SDL_main(int argc, char **argv) {
     setenv("ALBW_CRASH_HANDLER", "0", 0);
     fprintf(stderr, "android: data folder %s, ROM %s%s\n", ext, getenv("ALBW_ROM"),
             access(getenv("ALBW_ROM"), R_OK) ? " (MISSING: adb push your EU ROM there)" : "");
+    void albw_watch_start(void);   /* android_watch.c: ALBW_WATCH debug watchpoint */
+    albw_watch_start();
     return main(argc, argv);
 }
 #endif
