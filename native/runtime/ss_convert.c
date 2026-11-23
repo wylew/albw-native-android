@@ -36,6 +36,17 @@
 #include "runtime.h"
 #include "ss_convert.h"
 
+/* the binary whose symbols describe this build (runtime/savestate.c). Android: the game library,
+ * loaded at albw_ss_bias with ELF addresses from 0; this file adds the bias to every section and
+ * symbol address of this build, and states store them biased (README: Android save states). */
+const char *albw_ss_exe_path(void);
+#if defined(__ANDROID__)
+extern uint32_t albw_ss_bias;
+#define SELF_BIAS albw_ss_bias
+#else
+#define SELF_BIAS 0u
+#endif
+
 #define TAG(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
@@ -80,7 +91,7 @@ static const Sec *sec_of(const Image *im, uint32_t a) {
 }
 
 /* build sym[] / hash from an ELF32 symbol table */
-static int image_syms(Image *im, const Elf32_Sym *st, uint32_t n, const char *str, uint32_t strn) {
+static int image_syms(Image *im, const Elf32_Sym *st, uint32_t n, const char *str, uint32_t strn, uint32_t bias) {
     im->sym = calloc(n ? n : 1, sizeof *im->sym);
     if (!im->sym) return -1;
     const char *file = NULL;
@@ -92,10 +103,10 @@ static int image_syms(Image *im, const Elf32_Sym *st, uint32_t n, const char *st
         if (type == STT_FILE) { file = nm; continue; }
         if (type != STT_FUNC && type != STT_OBJECT && type != STT_NOTYPE) continue;
         if (!*nm || nm[0] == '.' || nm[0] == '$' || s->st_shndx == SHN_UNDEF || s->st_shndx >= SHN_LORESERVE) continue;
-        const Sec *sc = sec_of(im, s->st_value);
+        const Sec *sc = sec_of(im, s->st_value + bias);
         if (!sc) continue;
         Sym *d = &im->sym[im->nsym++];
-        d->addr = s->st_value;
+        d->addr = s->st_value + bias;
         d->size = s->st_size;
         d->name = nm;
         d->file = bind == STB_LOCAL ? file : NULL;
@@ -160,7 +171,7 @@ static uint8_t *g_self_file;   /* .symtab / .strtab / section names of /proc/sel
 static int self_image(void) {
     if (g_self_ok >= 0) return g_self_ok;
     g_self_ok = 0;
-    FILE *f = fopen("/proc/self/exe", "rb");
+    FILE *f = fopen(albw_ss_exe_path(), "rb");
     if (!f) return 0;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
@@ -178,16 +189,16 @@ static int self_image(void) {
         if (sh[i].sh_type == SHT_SYMTAB) { sym = &sh[i]; str = &sh[sh[i].sh_link]; }
         if ((sh[i].sh_flags & SHF_ALLOC) && sh[i].sh_addr && sh[i].sh_size && g_self.nsec < 96) {
             Sec *s = &g_self.sec[g_self.nsec++];
-            s->addr = sh[i].sh_addr;
+            s->addr = sh[i].sh_addr + SELF_BIAS;
             s->size = sh[i].sh_size;
             s->flags = sh[i].sh_flags;
             snprintf(s->name, sizeof s->name, "%s", nm);
         }
-        if (!strcmp(nm, ".rodata")) { g_self.ro = (const uint8_t *)(uintptr_t)sh[i].sh_addr; g_self.ro_addr = sh[i].sh_addr; g_self.ro_size = sh[i].sh_size; }
+        if (!strcmp(nm, ".rodata")) { g_self.ro = (const uint8_t *)(uintptr_t)(sh[i].sh_addr + SELF_BIAS); g_self.ro_addr = sh[i].sh_addr + SELF_BIAS; g_self.ro_size = sh[i].sh_size; }
     }
     if (!sym || !str) return 0;
     if (image_syms(&g_self, (const Elf32_Sym *)(g_self_file + sym->sh_offset), sym->sh_size / sizeof(Elf32_Sym),
-                   (const char *)g_self_file + str->sh_offset, str->sh_size))
+                   (const char *)g_self_file + str->sh_offset, str->sh_size, SELF_BIAS))
         return 0;
     g_self_ok = 1;
     return 1;
@@ -346,7 +357,11 @@ void ss_convert_write_trailer(SsBuf *b, const SsLayout *lay, const SsRangeInfo *
         memcpy(q, g_self.sec, g_self.nsec * sizeof(Sec)); q += g_self.nsec * sizeof(Sec);
         v = sym->sh_size / sizeof(Elf32_Sym);
         memcpy(q, &v, 4); q += 4;
-        memcpy(q, g_self_file + sym->sh_offset, sym->sh_size); q += sym->sh_size;
+        memcpy(q, g_self_file + sym->sh_offset, sym->sh_size);
+        if (SELF_BIAS)   /* stored as run-time addresses */
+            for (Elf32_Sym *e = (Elf32_Sym *)q; e < (Elf32_Sym *)(q + sym->sh_size); e++)
+                if (e->st_shndx != SHN_UNDEF && e->st_shndx < SHN_LORESERVE) e->st_value += SELF_BIAS;
+        q += sym->sh_size;
         v = str->sh_size;
         memcpy(q, &v, 4); q += 4;
         memcpy(q, g_self_file + str->sh_offset, str->sh_size);
@@ -433,6 +448,7 @@ static int same_code(const Conv *c, const uint8_t *o, const uint8_t *n, uint32_t
 }
 
 /* does the old code have a call instruction ending right before a? */
+#if !defined(__arm__)
 static int after_call(const uint8_t *code, uint32_t start, uint32_t size, uint32_t a) {
     uint32_t off = a - start;
     if (off >= 5 && off <= size && code[off - 5] == 0xE8) return 1;
@@ -499,6 +515,57 @@ static uint32_t frame_point_tail(Conv *c, const Sym *s, const uint8_t *oc, uint3
     }
     return 0;
 }
+#else
+/* ARM (Android): return addresses follow a bl / blx (ARM state: every game and port function) */
+static int arm_bl(uint32_t w) { return (w >> 28) != 0xF && ((w >> 24) & 0xF) == 0xB; }
+static int arm_blx_imm(uint32_t w) { return (w >> 25) == 0x7D; }
+static int arm_blx_reg(uint32_t w) { return (w >> 28) != 0xF && (w & 0x0FFFFFF0u) == 0x012FFF30u; }
+static uint32_t arm_bl_target(uint32_t at, uint32_t w) {
+    uint32_t t = at + 8 + (uint32_t)((int32_t)(w << 8) >> 6);
+    return arm_blx_imm(w) ? t + (((w >> 24) & 1) << 1) : t;
+}
+static int after_call(const uint8_t *code, uint32_t start, uint32_t size, uint32_t a) {
+    uint32_t off = a - start;
+    if ((a & 3) || off < 4 || off > size) return 0;
+    uint32_t w = rd32(code + off - 4);
+    return arm_bl(w) || arm_blx_imm(w) || arm_blx_reg(w);
+}
+/* as the x86 version: after the same call (the k-th bl to the same callee) in the new code, if the
+ * prologue up to the first `sub sp, sp, #imm` (8 bytes without one) is identical */
+static uint32_t callsite_map(Conv *c, const Sym *s, const Sym *n, const uint8_t *oc, uint32_t osz, uint32_t v) {
+    uint32_t off = v - s->addr;
+    if (off < 4 || off > osz) return 0;
+    uint32_t w = rd32(oc + off - 4);
+    if (!arm_bl(w)) return 0;
+    const uint8_t *nc = (const uint8_t *)(uintptr_t)n->addr;
+    uint32_t pl = 8;
+    for (uint32_t i = 0; i < 16 && 4 * i + 4 <= osz; i++)
+        if ((rd32(oc + 4 * i) & 0x0FFFF000u) == 0x024DD000u) { pl = 4 * i + 4; break; }
+    if (pl > osz || pl > n->size || memcmp(oc, nc, pl)) return 0;
+    uint32_t otgt = arm_bl_target(v - 4, w);
+    int f, k = sym_at(&c->old, otgt, &f);
+    const Sym *ot = NULL;
+    for (int i = 0; i < k; i++) if (c->old.sym[f + i].addr == otgt) { ot = &c->old.sym[f + i]; break; }
+    if (!ot) return 0;
+    const Sym *nt = find_key(c->cur, ot);
+    if (!nt) return 0;
+    int ord = 0;
+    for (uint32_t i = 0; i + 4 <= off - 4; i += 4) {
+        uint32_t x = rd32(oc + i);
+        if (arm_bl(x) && arm_bl_target(s->addr + i, x) == otgt) ord++;
+    }
+    for (uint32_t i = 0, seen = 0; i + 4 <= n->size; i += 4) {
+        uint32_t x = rd32(nc + i);
+        if (arm_bl(x) && arm_bl_target(n->addr + i, x) == nt->addr && (int)seen++ == ord) return n->addr + i + 4;
+    }
+    return 0;
+}
+/* the x86 frame-point tail is not ported: a state saved in a changed albw_ss_frame_point is refused */
+static uint32_t frame_point_tail(Conv *c, const Sym *s, const uint8_t *oc, uint32_t osz, uint32_t v) {
+    (void)c; (void)s; (void)oc; (void)osz; (void)v;
+    return 0;
+}
+#endif
 
 /* Heap-like memory (game heap, arena, renderer pools, static data) also holds asset bytes, floats
  * and indices that fall into the binary's range by chance. Game state points into the binary's
@@ -587,7 +654,9 @@ static uint32_t map_word(Conv *c, const uint8_t *at, uint32_t v, int pol) {
          * start of a function: the callee is the next line, it returns at once): never a live frame,
          * a leftover word in a reused stack slot - keep it (user slot 4 was refused for
          * func_0064E9F4+0xF after a rebuild changed that function) */
+#if !defined(__arm__)
         if (off >= 5 && oc[off - 5] == 0xE8 && rd32(oc + off - 4) == 0) return v;
+#endif
         if (n->size != osz || !same_code(c, oc, (const uint8_t *)(uintptr_t)n->addr, osz)) {
             uint32_t na = callsite_map(c, s, n, oc, osz, v);
             if (!na) na = frame_point_tail(c, s, oc, osz, v);
@@ -691,7 +760,7 @@ static int old_image(Conv *c, const Parse *ps) {
     p += (size_t)nsym * sizeof(Elf32_Sym);
     uint32_t strn = rd32(p); p += 4;
     if (p + strn > e) return -1;
-    if (image_syms(&c->old, st, nsym, (const char *)p, strn)) return -1;
+    if (image_syms(&c->old, st, nsym, (const char *)p, strn, 0)) return -1;
     c->old_lo = 0xFFFFFFFFu;
     c->old_hi = 0;
     for (int i = 0; i < c->old.nsec; i++) {
@@ -716,7 +785,7 @@ static void initial_image(uint8_t *dst, uint32_t addr, uint32_t size) {
     static uint8_t *img;
     static size_t imglen;
     if (!img) {
-        FILE *f = fopen("/proc/self/exe", "rb");
+        FILE *f = fopen(albw_ss_exe_path(), "rb");
         if (!f) return;
         fseek(f, 0, SEEK_END); imglen = (size_t)ftell(f); fseek(f, 0, SEEK_SET);
         img = malloc(imglen);
@@ -728,12 +797,13 @@ static void initial_image(uint8_t *dst, uint32_t addr, uint32_t size) {
     const Elf32_Shdr *sh = (const Elf32_Shdr *)(img + eh->e_shoff);
     for (int i = 0; i < eh->e_shnum; i++) {
         if (!(sh[i].sh_flags & SHF_ALLOC) || (sh[i].sh_flags & SHF_EXECINSTR)) continue;
-        uint32_t lo = sh[i].sh_addr > addr ? sh[i].sh_addr : addr;
-        uint32_t hi = sh[i].sh_addr + sh[i].sh_size < addr + size ? sh[i].sh_addr + sh[i].sh_size : addr + size;
+        uint32_t sa = sh[i].sh_addr + SELF_BIAS;
+        uint32_t lo = sa > addr ? sa : addr;
+        uint32_t hi = sa + sh[i].sh_size < addr + size ? sa + sh[i].sh_size : addr + size;
         if (lo >= hi) continue;
         if (sh[i].sh_type == SHT_NOBITS) memset(dst + (lo - addr), 0, hi - lo);
-        else if (sh[i].sh_offset + (lo - sh[i].sh_addr) + (hi - lo) <= imglen)
-            memcpy(dst + (lo - addr), img + sh[i].sh_offset + (lo - sh[i].sh_addr), hi - lo);
+        else if (sh[i].sh_offset + (lo - sa) + (hi - lo) <= imglen)
+            memcpy(dst + (lo - addr), img + sh[i].sh_offset + (lo - sa), hi - lo);
     }
 }
 

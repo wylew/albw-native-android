@@ -27,6 +27,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,6 +115,15 @@ static int load_ssmap(void) {
     return 0;
 }
 
+/* the binary file (ss_convert.c reads its symbols): Android: libalbw.so, else /proc/self/exe */
+const char *albw_ss_exe_path(void) {
+#if defined(__ANDROID__)
+    return g_exe[0] ? g_exe : "/proc/self/exe";
+#else
+    return "/proc/self/exe";
+#endif
+}
+
 /* the binary's identity: FNV-1a 64 of its file (a state only fits the build that wrote it) */
 static uint64_t g_build;
 static uint64_t build_hash(void) {
@@ -138,8 +148,11 @@ static uint64_t build_hash(void) {
 /* Android (README: save states): /proc/self/exe is the Java runtime; the game library (libalbw.so,
  * loaded at a fixed address by the loader libmain.so) is the binary, and its .ssmap comes from the
  * APK assets. Called from albw_android_main before the game starts. */
+uint32_t albw_ss_bias;   /* load address of the library (its ELF addresses start at 0): ss_convert.c */
 void albw_ss_android_init(const char *lib, char *map, size_t len) {
     snprintf(g_exe, sizeof g_exe, "%s", lib);
+    Dl_info di;
+    if (dladdr((void *)albw_ss_android_init, &di) && di.dli_fbase) albw_ss_bias = (uint32_t)(uintptr_t)di.dli_fbase;
     g_ssmap_text = map;
     g_ssmap_len = map ? len : 0;
     build_hash();

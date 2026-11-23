@@ -165,12 +165,16 @@ NAMES=($(python3 tools/gen_names.py native/names.txt $A/defined_syms.txt))
 OUTDIR=$A/jniLibs/armeabi-v7a
 mkdir -p $OUTDIR
 # the game: libalbw.so, loaded at a fixed address by the loader libmain.so (android/loader/loader.c,
-# ALBW_GAME_BASE): save states store pointers into its code and data (README: Android save states)
+# ALBW_GAME_BASE): save states store pointers into its code and data (README: Android save states).
+# The game's generated data (.albw_ro/.albw_rw/.albw_zi: vtables, tables, globals) at fixed offsets
+# (+32 MiB, clear of code growth), as tools/link.sh does on the PC: pointers into it stay valid in
+# every build, which loading states of other builds relies on (runtime/ss_convert.c).
 GAME_BASE=60000000
 OUT=$OUTDIR/libalbw.so
 clang $TARGET -shared -fPIC "${SANFLAGS[@]}" -o $OUT "${NATIVE[@]}" $A/native/stubs.o $A/albw_game.o \
     -L$SDLP/lib -lSDL3 -lz -lm -ldl -llog -landroid \
     -Wl,-soname,libalbw.so -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-z,max-page-size=16384 \
+    -Wl,--section-start=.albw_ro=0x2000000 -Wl,--section-start=.albw_rw=0x2100000 -Wl,--section-start=.albw_zi=0x2200000 \
     "${NAMES[@]}" -Wl,-Map=$A/libalbw.map
 clang $TARGET -shared -fPIC -O2 -o $OUTDIR/libmain.so android/loader/loader.c -ldl -llog -Wl,-soname,libmain.so
 rm -f $A/libmain.map
@@ -183,4 +187,8 @@ fi
 mkdir -p $A/assets
 python3 tools/gen_ssmap.py $A/libalbw.map $OUT --lld $GAME_BASE > $A/assets/libalbw.ssmap \
     || { echo "link_android: gen_ssmap failed (save states unavailable)"; rm -f $A/assets/libalbw.ssmap; }
-echo "linked $OUT ($(du -h $OUT | cut -f1))"
+# the APK keeps the symbol table (save states of other builds: runtime/ss_convert.c reads it; Gradle
+# keepDebugSymbols) but not the DWARF; the full library for llvm-addr2line: $A/libalbw.debug.so
+cp $OUT $A/libalbw.debug.so
+llvm-objcopy --strip-debug $OUT
+echo "linked $OUT ($(du -h $OUT | cut -f1); with debug info: $A/libalbw.debug.so)"

@@ -62,6 +62,9 @@ android {
     // native libraries extracted to nativeLibraryDir (a loader may need real files, step 4)
     packaging {
         jniLibs.useLegacyPackaging = true
+        // libalbw.so keeps its symbol table: loading save states of other builds needs it
+        // (runtime/ss_convert.c); link_android.sh already removed the debug info
+        jniLibs.keepDebugSymbols += "**/libalbw.so"
     }
     lint {
         abortOnError = false

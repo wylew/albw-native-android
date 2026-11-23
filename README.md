@@ -239,7 +239,7 @@ definitions whose ARM (AAPCS softfp) argument words differ while the i386 words 
 direct calls checked, none found. `lldb-server` from NDK r30 crashed on attach (32-bit).
 Crashes: `adb logcat -b crash` (debuggerd tombstone; the port's own handler is off on Android).
 Addresses: `pc - (fault pc - tombstone pc)` = offset in the unstripped
-`build/android/jniLibs/armeabi-v7a/libalbw.so` (the game; `libmain.so` is only the loader). It loads at
+`build/android/libalbw.debug.so` (the game with debug info; `libmain.so` is only the loader). It loads at
 0x60000000, so offset = pc - 0x60000000. Then `llvm-addr2line -f -e <that file> 0x<offset>`.
 Game code has no unwind tables, so a tombstone shows one frame: symbolize `lr` too.
 
@@ -292,9 +292,19 @@ How it is made to work (everything a state points into must be at the same addre
   at a fixed place in each thread's stack slot (`runtime/tlv.h`): Android's 32-bit emulated TLS keeps
   them in malloc'd blocks, and restored frames that cached their addresses crashed (SIGBUS in
   `ss_park`).
-Not done: states of another build (`runtime/ss_convert.c` reads the binary's symbol table, which the
-APK's stripped `libalbw.so` lacks), PC states on Android (different code). One of the first five test
-loads crashed (null pointer at 0x34, not reproduced since).
+- **states of other builds load too** (`runtime/ss_convert.c`, as on the PC): the APK's
+  `libalbw.so` keeps its symbol table (link_android.sh strips only the DWARF, Gradle
+  `keepDebugSymbols`; the full library is `build/android/libalbw.debug.so`), the converter reads it
+  from the library path with the load address added, recognises ARM return addresses (after a
+  `bl` / `blx`; a changed function: the same call, matched by callee, if the prologue is unchanged),
+  and the game's generated data is pinned at fixed offsets in the library (`--section-start`
+  .albw_ro/.albw_rw/.albw_zi at +32/+33/+34 MiB) so pointers into it never move. Checked: a state of
+  build A loaded in build B (4 KiB of extra code and data): 4,251 pointers, 91 return addresses,
+  7,913 strings remapped, still running a minute later.
+Not done: PC states on Android (different code); the x86 frame-point tail (a state saved in a
+changed `albw_ss_frame_point` is refused). One of the first five same-build test loads crashed
+(null pointer at 0x34, not reproduced since). States of builds before 2026-11-23 evening (other
+data layout) do not load.
 
 ### Working on it from another machine
 
@@ -327,3 +337,4 @@ then commit.
 | 2026-11-23 | Stop A11 fixed (lost `this` in `func_0030D120`). Open: the Sanctuary cutscene with Yuga shows the 3D scene squashed into a corner at render scale 2 (text fine): probably a render-to-texture pass that ignores the render scale |
 | 2026-11-23 | Save states on Android (see Save states): game library at a fixed address via a loader, lld map, thread-locals at fixed addresses. Saved and loaded across runs on the RP5 (4 of 5 loads fine, one crash not reproduced). L3+L save, L3+R load. Also: per-target viewport memory for render-to-texture passes (Yuga cutscene, still being fixed) |
 | 2026-11-23 | Stop A13 fixed (lost float argument in `func_0056F090`, crashed the sound thread after a load) |
+| 2026-11-23 | Save states load across builds (symbol table kept in the APK, ARM return-address matching in ss_convert, game data pinned at fixed offsets in libalbw.so). A state of build A loaded in a shifted build B on the RP5 |
