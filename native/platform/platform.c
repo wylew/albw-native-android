@@ -1684,6 +1684,7 @@ void plat_end_frame(void) {
             }
         }
     }
+    { void albw_gl_count_frame(void); albw_gl_count_frame(); }   /* render/glcount.c (ALBW_GL_COUNT) */
     {   /* Debug > Show FPS: game frames per second in the window title, updated twice a second */
         static uint64_t t0; static int n, shown;
         n++;
