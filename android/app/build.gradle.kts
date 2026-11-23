@@ -12,7 +12,7 @@ if (!File(sdlDir, "CMakeLists.txt").exists()) {
 // The game: tools/link_android.sh -> build/android/jniLibs/<abi>/{libmain,libSDL3}.so.
 // Without it (or with -Psmoke) the step-1 smoke test is built from src/main/cpp instead.
 val gameLibs = File(project.findProperty("gameLibs")?.toString() ?: File(repoRoot, "build/android/jniLibs").path)
-val useGame = File(gameLibs, "armeabi-v7a/libmain.so").exists() && !project.hasProperty("smoke")
+val useGame = File(gameLibs, "armeabi-v7a/libalbw.so").exists() && !project.hasProperty("smoke")
 
 android {
     namespace = "org.albw.port"
@@ -40,6 +40,8 @@ android {
 
     if (useGame) {
         sourceSets["main"].jniLibs.directories.add(gameLibs.path)
+        // the save-state map of libalbw.so (tools/link_android.sh)
+        sourceSets["main"].assets.directories.add(File(gameLibs.parentFile, "assets").path)
     } else {
         externalNativeBuild {
             cmake {

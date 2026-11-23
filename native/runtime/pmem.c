@@ -82,6 +82,19 @@ static uint8_t *slot_lo(int slot, size_t *size) {
 int pmem_stack_slots(void) {
     return 1 + (int)((AREA[PMEM_STACKS].size - MAIN_STACK - STACK_GUARD) / (WORKER_STACK + STACK_GUARD));
 }
+/* the per-thread data of the stack slot that contains sp, or NULL (Android: runtime/tlv.c) */
+void *pmem_slot_data_of(uintptr_t sp) {
+    if (!g_base[PMEM_STACKS]) return NULL;
+    uintptr_t b = (uintptr_t)g_base[PMEM_STACKS];
+    if (sp < b || sp >= b + AREA[PMEM_STACKS].size) return NULL;
+    for (int k = 0; k < pmem_stack_slots(); k++) {
+        size_t size;
+        uint8_t *m = slot_lo(k, &size);
+        if (m && sp >= (uintptr_t)m && sp < (uintptr_t)m + size) return m;
+    }
+    return NULL;
+}
+
 /* the slot's memory made usable: *data = its per-thread data, *lo / return = the stack [lo, top) */
 void *pmem_stack_slot(int slot, void **lo, void **data) {
     pmem_init();

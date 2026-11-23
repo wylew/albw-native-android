@@ -62,6 +62,7 @@ void albw_fp_set_3ds_mode(void) { _mm_setcsr((_mm_getcsr() & ~0x0040u) | 0x8000u
 #endif
 
 #include "../runtime/runtime.h"
+#include "../runtime/tlv.h"
 #include "../include/gptr.h" /* ALBW_GP: game pointer words (x86-64 low-4GB build) */
 
 /* ================================================================== results */
@@ -132,8 +133,16 @@ static void cond_init_monotonic(pthread_cond_t *cv) {
 typedef struct OsObject OsObject;
 
 static atomic_uint g_next_thread_id = 1;
+#if defined(__ANDROID__)
+#define t_id (albw_tlv()->t_id)   /* fixed address: runtime/tlv.h */
+#else
 static _Thread_local uint32_t t_id;          /* native thread id, 0 = not assigned yet */
+#endif
+#if defined(__ANDROID__)
+#define t_self (*(OsObject **)&albw_tlv()->t_self)   /* fixed address: runtime/tlv.h */
+#else
 static _Thread_local OsObject *t_self;       /* this thread's object (lazily for foreign threads) */
+#endif
 
 static uint32_t current_thread_id(void) {
     if (!t_id) t_id = atomic_fetch_add(&g_next_thread_id, 1);
@@ -164,7 +173,11 @@ typedef struct SchedRec {
 
 static pthread_mutex_t g_sched_m = PTHREAD_MUTEX_INITIALIZER;
 static struct { SchedRec *running; SchedRec *ready; } g_core[2];
+#if defined(__ANDROID__)
+#define t_sched (*(SchedRec **)&albw_tlv()->t_sched)   /* fixed address: runtime/tlv.h */
+#else
 static _Thread_local SchedRec *t_sched;
+#endif
 static int g_sched_mode = -1;  /* -1 unknown, 0 parallel, 1 priority */
 static SchedRec *g_all_sched;  /* g_sched_m */
 
@@ -325,7 +338,11 @@ static struct { pthread_mutex_t m; Waiter *head; } g_park[PARK_BUCKETS] = {
     [0 ... PARK_BUCKETS - 1] = { PTHREAD_MUTEX_INITIALIZER, NULL },
 };
 static _Thread_local Waiter t_waiter_local;   /* threads without a stack slot (host threads) */
+#if defined(__ANDROID__)
+#define t_wp (*(Waiter **)&albw_tlv()->t_wp)   /* fixed address: runtime/tlv.h */
+#else
 static _Thread_local Waiter *t_wp;            /* game threads: the record in their slot data */
+#endif
 static inline Waiter *my_waiter(void) { return t_wp ? t_wp : &t_waiter_local; }
 
 static unsigned park_bucket(const void *addr) {
@@ -1647,7 +1664,11 @@ typedef struct SsThr {
 
 static pthread_mutex_t g_ss_m = PTHREAD_MUTEX_INITIALIZER;
 static SsThr *g_ss_thr;
+#if defined(__ANDROID__)
+#define t_ss (*(SsThr **)&albw_tlv()->t_ss)   /* fixed address: runtime/tlv.h */
+#else
 static _Thread_local SsThr *t_ss;
+#endif
 #define SS_ALT_STACK (256u << 10)
 #define SS_REDZONE 256u
 #define MAX_SLOTS 64

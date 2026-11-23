@@ -1690,6 +1690,24 @@ void plat_end_frame(void) {
         }
     }
     { void albw_gl_count_frame(void); albw_gl_count_frame(); }   /* render/glcount.c (ALBW_GL_COUNT) */
+#if defined(__ANDROID__)
+    {   /* save states on a handheld (no F6 / F7): hold L3 and press L = save, R = load (current slot) */
+        static int prev_l, prev_r;
+        int l3 = 0, l = 0, r = 0, n = 0;
+        SDL_JoystickID *ids = SDL_GetGamepads(&n);
+        for (int i = 0; ids && i < n; i++) {
+            SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
+            if (!g) continue;
+            l3 |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+            l |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+            r |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+        }
+        SDL_free(ids);
+        if (l3 && l && !prev_l && albw_ss_request) { fprintf(stderr, "savestate: save to slot %d (L3+L)\n", g_ss_slot + 1); albw_ss_request(1, g_ss_slot); }
+        if (l3 && r && !prev_r && albw_ss_request) { fprintf(stderr, "savestate: load slot %d (L3+R)\n", g_ss_slot + 1); albw_ss_request(2, g_ss_slot); }
+        prev_l = l; prev_r = r;
+    }
+#endif
     {   /* Debug > Show FPS: game frames per second in the window title, updated twice a second */
         static uint64_t t0; static int n, shown;
         n++;

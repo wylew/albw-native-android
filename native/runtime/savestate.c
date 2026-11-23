@@ -86,9 +86,14 @@ static char *g_ssmap_text;   /* <binary>.ssmap as read at startup (ss_preload) *
 static size_t g_ssmap_len;
 static int load_ssmap(void) {
     char path[4200];
+#if defined(__ANDROID__)
+    /* set by albw_ss_android_init (runtime/android.c): the game library and the map from the APK */
+    if (!g_exe[0]) { snprintf(g_ranges_err, sizeof g_ranges_err, "save states not set up (no map)"); return -1; }
+#else
     ssize_t n = readlink("/proc/self/exe", g_exe, sizeof g_exe - 1);
     if (n <= 0) { snprintf(g_ranges_err, sizeof g_ranges_err, "cannot find the binary"); return -1; }
     g_exe[n] = 0;
+#endif
     snprintf(path, sizeof path, "%s.ssmap", g_exe);
     /* the copy read at startup (ss_preload): the file may be gone by now (relinked meanwhile) */
     FILE *f = g_ssmap_text ? fmemopen(g_ssmap_text, g_ssmap_len, "r") : fopen(path, "r");
@@ -129,6 +134,17 @@ static uint64_t build_hash(void) {
  * "build/albw (deleted)" and save states stopped with "no ... (deleted).ssmap" (user report).
  * Only the file is read here; load_ssmap still parses it at the first save / load (same range
  * order as before), and albw_ss_frame_point is unchanged: states are saved from inside it. */
+#if defined(__ANDROID__)
+/* Android (README: save states): /proc/self/exe is the Java runtime; the game library (libalbw.so,
+ * loaded at a fixed address by the loader libmain.so) is the binary, and its .ssmap comes from the
+ * APK assets. Called from albw_android_main before the game starts. */
+void albw_ss_android_init(const char *lib, char *map, size_t len) {
+    snprintf(g_exe, sizeof g_exe, "%s", lib);
+    g_ssmap_text = map;
+    g_ssmap_len = map ? len : 0;
+    build_hash();
+}
+#else
 __attribute__((constructor)) static void ss_preload(void) {
     ssize_t n = readlink("/proc/self/exe", g_exe, sizeof g_exe - 1);
     if (n <= 0) return;
@@ -147,6 +163,7 @@ __attribute__((constructor)) static void ss_preload(void) {
     }
     build_hash();
 }
+#endif
 static uint64_t g_session;   /* states of a run without fixed addresses load only in that run */
 
 /* ------------------------------------------------------------------ host threads (sound) */

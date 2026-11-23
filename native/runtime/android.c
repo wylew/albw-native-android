@@ -96,7 +96,9 @@ static void log_to_logcat(void) {
 /* ---- entry ---- */
 int main(int argc, char **argv);   /* runtime/entry.c */
 
-int SDL_main(int argc, char **argv) {
+/* the entry the loader (android/loader/loader.c, libmain.so) calls after loading libalbw.so at its
+ * fixed address (SDLActivity calls the loader's SDL_main) */
+int albw_android_main(int argc, char **argv) {
     log_to_logcat();
     const char *ext = SDL_GetAndroidExternalStoragePath();
     if (!ext) {
@@ -128,6 +130,17 @@ int SDL_main(int argc, char **argv) {
     setenv("ALBW_CRASH_HANDLER", "0", 0);
     fprintf(stderr, "android: data folder %s, ROM %s%s\n", ext, getenv("ALBW_ROM"),
             access(getenv("ALBW_ROM"), R_OK) ? " (MISSING: adb push your EU ROM there)" : "");
+    {   /* save states: this library and its .ssmap (APK asset written by tools/link_android.sh) */
+        Dl_info di;
+        void albw_ss_android_init(const char *lib, char *map, size_t len);
+        size_t mlen = 0;
+        char *map = SDL_LoadFile("libalbw.ssmap", &mlen);
+        if (dladdr((void *)albw_android_main, &di) && di.dli_fname) {
+            albw_ss_android_init(di.dli_fname, map, mlen);
+            fprintf(stderr, "android: save states %s (%s, map %zu bytes, loaded at %p)\n", map ? "available" : "UNAVAILABLE (no map asset)",
+                    di.dli_fname, mlen, di.dli_fbase);
+        }
+    }
     void albw_watch_start(void);   /* android_watch.c: ALBW_WATCH debug watchpoint */
     albw_watch_start();
     return main(argc, argv);

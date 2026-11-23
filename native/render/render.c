@@ -1462,6 +1462,16 @@ static void apply_frag(void) {
      * inside the stretch, while panes that cover the whole width (fades, backgrounds) fill it */
     float fy = 1.0f, oy = 0.0f;
     if (vs && sph(vs) != vs->h && R.vp[1] == 0 && R.vp[3] == vs->h) fy = (float)sph(vs) / (float)vs->h;
+    {   /* debug ALBW_PASS_TRACE: the widescreen stretch decision, when it changes */
+        static int tr = -1; if (tr < 0) tr = getenv("ALBW_PASS_TRACE") != NULL;
+        static uintptr_t la; static int lv[4], lph; static float lfy;
+        if (tr && vs && (vs->addr != la || memcmp(lv, R.vp, sizeof lv) || lph != sph(vs) || lfy != fy)) {
+            extern long g_plat_frames __attribute__((weak));
+            fprintf(stderr, "pass: f=%ld stretch surf %#lx %dx%d ph %d %s vp %d,%d,%d,%d fy %.3f\n", &g_plat_frames ? g_plat_frames : 0L,
+                    (unsigned long)vs->addr, vs->w, vs->h, sph(vs), R.cur_c ? "colour" : "depth", R.vp[0], R.vp[1], R.vp[2], R.vp[3], fy);
+            la = vs->addr; memcpy(lv, R.vp, sizeof lv); lph = sph(vs); lfy = fy;
+        }
+    }
     g_cur_fy = fy;
     if (R.scissor) {
         glEnable(GL_SCISSOR_TEST);
@@ -1553,9 +1563,16 @@ void render_set_widescreen(int rows) {
 /* ================================================================== immediate API */
 
 
+static void vp_memo_bind(uintptr_t color, int w, int h);   /* per-target viewport memory (below) */
 void render_set_target(uintptr_t color, int cfmt, uintptr_t depth, int dfmt, int w, int h) {
     if (!render_ready()) return;
     lock();
+    {   /* debug ALBW_PASS_TRACE: render-target binds */
+        static int tr = -1; if (tr < 0) tr = getenv("ALBW_PASS_TRACE") != NULL;
+        extern long g_plat_frames __attribute__((weak));
+        if (tr) fprintf(stderr, "pass: f=%ld target %#lx %dx%d draws %lu\n", &g_plat_frames ? g_plat_frames : 0L, (unsigned long)color, w, h, g_render_draws);
+    }
+    vp_memo_bind(color, w, h);
     Surface *c = color ? surface_get(color, w, h, cfmt, false) : R.cur_c;
     Surface *d = depth ? surface_get(depth, w, h, dfmt, true) : R.cur_d;
     if (color) R.cur_c = c;
@@ -1566,6 +1583,48 @@ void render_set_target(uintptr_t color, int cfmt, uintptr_t depth, int dfmt, int
     unlock();
 }
 
+/* Last viewport and scissor per render target (colour address + size). The game's GraphicsContext
+ * emits viewport / scissor commands only when its own cached copy changes (0048AD94 / 0048AD08), so
+ * after a render-to-texture pass with a square viewport, the main scene could be drawn with that
+ * viewport: the Sanctuary cutscene with Yuga showed the 3D scene squashed into a corner (README:
+ * Android boot stop A12). Binding a target brings back the viewport and scissor last used with it;
+ * a pass that wants others sets them after the bind. ALBW_NO_VP_MEMO=1: off. */
+#define VP_MEMO 32
+static struct { uintptr_t color; int w, h, vp[4], sc_on, sc[4]; } g_vp_memo[VP_MEMO];
+static int g_vp_memo_n, g_vp_cur = -1;
+static void vp_memo_save(void) {
+    if (g_vp_cur < 0) return;
+    memcpy(g_vp_memo[g_vp_cur].vp, R.vp, sizeof g_vp_memo[0].vp);
+    g_vp_memo[g_vp_cur].sc_on = R.scissor;
+    memcpy(g_vp_memo[g_vp_cur].sc, R.sc, sizeof g_vp_memo[0].sc);
+}
+static void vp_memo_bind(uintptr_t color, int w, int h) {
+    static int off = -1;
+    if (off < 0) off = getenv("ALBW_NO_VP_MEMO") != NULL;
+    g_vp_cur = -1;
+    if (off || !color) return;
+    for (int i = 0; i < g_vp_memo_n; i++)
+        if (g_vp_memo[i].color == color && g_vp_memo[i].w == w && g_vp_memo[i].h == h) {
+            g_vp_cur = i;
+            memcpy(R.vp, g_vp_memo[i].vp, sizeof R.vp);
+            R.scissor = g_vp_memo[i].sc_on;
+            memcpy(R.sc, g_vp_memo[i].sc, sizeof R.sc);
+            R.frag_dirty = true;
+            return;
+        }
+    int i = g_vp_memo_n < VP_MEMO ? g_vp_memo_n++ : (int)((color >> 4) % VP_MEMO);
+    g_vp_memo[i].color = color; g_vp_memo[i].w = w; g_vp_memo[i].h = h;
+    g_vp_cur = i;
+    /* first bind: the whole target, no scissor. Not "what is set now": the main buffer's first bind
+     * came right after the 128x128 render-to-texture viewport and kept it (the cutscene broke
+     * halfway) */
+    R.vp[0] = 0; R.vp[1] = 0; R.vp[2] = w; R.vp[3] = h;
+    R.scissor = 0;
+    R.sc[0] = 0; R.sc[1] = 0; R.sc[2] = w; R.sc[3] = h;
+    R.frag_dirty = true;
+    vp_memo_save();
+}
+
 void render_set_viewport(int x, int y, int w, int h) {
     {   /* debug ALBW_PASS_TRACE: viewport changes with the draw count */
         static int tr = -1; if (tr < 0) tr = getenv("ALBW_PASS_TRACE") != NULL;
@@ -1574,12 +1633,14 @@ void render_set_viewport(int x, int y, int w, int h) {
             fprintf(stderr, "pass: f=%ld viewport %d,%d,%d,%d draws %lu\n", &g_plat_frames ? g_plat_frames : 0L, x, y, w, h, g_render_draws);
     }
     R.vp[0] = x; R.vp[1] = y; R.vp[2] = w; R.vp[3] = h;
+    vp_memo_save();
     R.frag_dirty = true;
 }
 
 void render_set_scissor(int enable, int x, int y, int w, int h) {
     R.scissor = enable != 0;
     R.sc[0] = x; R.sc[1] = y; R.sc[2] = w > 0 ? w : 0; R.sc[3] = h > 0 ? h : 0;
+    vp_memo_save();
     R.frag_dirty = true;
 }
 

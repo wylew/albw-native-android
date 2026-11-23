@@ -164,16 +164,23 @@ NAMES=($(python3 tools/gen_names.py native/names.txt $A/defined_syms.txt))
 
 OUTDIR=$A/jniLibs/armeabi-v7a
 mkdir -p $OUTDIR
-OUT=$OUTDIR/libmain.so
+# the game: libalbw.so, loaded at a fixed address by the loader libmain.so (android/loader/loader.c,
+# ALBW_GAME_BASE): save states store pointers into its code and data (README: Android save states)
+GAME_BASE=60000000
+OUT=$OUTDIR/libalbw.so
 clang $TARGET -shared -fPIC "${SANFLAGS[@]}" -o $OUT "${NATIVE[@]}" $A/native/stubs.o $A/albw_game.o \
     -L$SDLP/lib -lSDL3 -lz -lm -ldl -llog -landroid \
-    -Wl,-soname,libmain.so -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-z,max-page-size=16384 \
-    "${NAMES[@]}" -Wl,-Map=$A/libmain.map
+    -Wl,-soname,libalbw.so -Wl,-Bsymbolic -Wl,--no-undefined -Wl,-z,max-page-size=16384 \
+    "${NAMES[@]}" -Wl,-Map=$A/libalbw.map
+clang $TARGET -shared -fPIC -O2 -o $OUTDIR/libmain.so android/loader/loader.c -ldl -llog -Wl,-soname,libmain.so
+rm -f $A/libmain.map
 cp $SDLP/lib/libSDL3.so $OUTDIR/
 if [[ -n $UBSAN ]]; then
     cp "$(ls $TC/lib/clang/*/lib/linux/libclang_rt.ubsan_standalone-arm-android.so | head -1)" $OUTDIR/
     # Gradle packages build/android/jniLibs: point it at this build with -PjniLibs=$OUTDIR/.. or copy
     echo "link_android: UBSan build in $A/jniLibs (install: rsync it over build/android/jniLibs, or -PgameLibs=$A/jniLibs)"
 fi
-python3 tools/gen_ssmap.py $A/libmain.map $OUT > $A/libmain.ssmap 2>/dev/null || echo "link_android: gen_ssmap failed (save states unavailable)"
+mkdir -p $A/assets
+python3 tools/gen_ssmap.py $A/libalbw.map $OUT --lld $GAME_BASE > $A/assets/libalbw.ssmap \
+    || { echo "link_android: gen_ssmap failed (save states unavailable)"; rm -f $A/assets/libalbw.ssmap; }
 echo "linked $OUT ($(du -h $OUT | cut -f1))"

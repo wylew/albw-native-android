@@ -2,6 +2,7 @@
 """Save states: the static data ranges that hold game state, from the GNU ld map of build/albw.
 
 usage: tools/gen_ssmap.py <binary>.map <binary>  >  <binary>.ssmap   (tools/link.sh)
+       tools/gen_ssmap.py <lib>.map <lib> --lld <hex load base>     (tools/link_android.sh)
 
 Output (read by native/runtime/savestate.c at the first save / load):
     albw_data <hex address>                 the map belongs to this binary
@@ -26,7 +27,42 @@ EXCLUDE = [
     r"/native/sdk/(os|gfx|fs|memory|snd|light)\.o$",
 ]
 
+def main_lld(mp, base):
+    """lld map (tools/link_android.sh): "VMA LMA Size Align Out/In/Symbol" rows; the output section
+    name at the first indent, input sections "file:(section)" at the second, symbols at the third.
+    `base`: the fixed load address of the shared library (android/loader/loader.c)."""
+    ranges, albw_data, out_sec = [], None, None
+    for line in open(mp, errors="replace"):
+        m = re.match(r"^\s*([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+(\d+) (.*)$", line.rstrip("\n"))
+        if not m:
+            continue
+        vma, size, rest = int(m.group(1), 16), int(m.group(3), 16), m.group(5)
+        if not rest.startswith(" "):
+            out_sec = rest.strip()
+            continue
+        if out_sec not in (".data", ".bss", ".albw_rw", ".albw_zi"):
+            continue
+        r = rest.strip()
+        mi = re.match(r"^(.*):\((\S+)\)$", r)
+        if not mi:
+            if r == "albw_data":
+                albw_data = vma + base
+            continue
+        obj = mi.group(1)
+        if not size or not (obj.startswith("build/") or "/build/" in obj):
+            continue
+        if any(re.search(p, "/" + obj) for p in EXCLUDE):
+            continue
+        ranges.append([vma + base, size, os.path.basename(obj)])
+    return ranges, albw_data
+
 def main():
+    if len(sys.argv) > 3 and sys.argv[3] == "--lld":
+        base = int(sys.argv[4], 16) if len(sys.argv) > 4 else 0
+        ranges, albw_data = main_lld(sys.argv[1], base)
+        if albw_data is None:
+            sys.exit("gen_ssmap: albw_data not in the map")
+        return emit(ranges, albw_data)
     mp, binary = sys.argv[1], sys.argv[2]
     lines = open(mp, errors="replace").read().split("\n")
     out_sec = None
@@ -85,6 +121,9 @@ def main():
                 break
     if albw_data is None:
         sys.exit("gen_ssmap: albw_data not in the map")
+    emit(ranges, albw_data)
+
+def emit(ranges, albw_data):
     ranges.sort()
     merged = []
     for a, s, o in ranges:

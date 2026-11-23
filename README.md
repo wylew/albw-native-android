@@ -239,7 +239,8 @@ definitions whose ARM (AAPCS softfp) argument words differ while the i386 words 
 direct calls checked, none found. `lldb-server` from NDK r30 crashed on attach (32-bit).
 Crashes: `adb logcat -b crash` (debuggerd tombstone; the port's own handler is off on Android).
 Addresses: `pc - (fault pc - tombstone pc)` = offset in the unstripped
-`build/android/jniLibs/armeabi-v7a/libmain.so`, then `llvm-addr2line -f -e <that file> 0x<offset>`.
+`build/android/jniLibs/armeabi-v7a/libalbw.so` (the game; `libmain.so` is only the loader). It loads at
+0x60000000, so offset = pc - 0x60000000. Then `llvm-addr2line -f -e <that file> 0x<offset>`.
 Game code has no unwind tables, so a tombstone shows one frame: symbolize `lr` too.
 
 | # | Stop | Cause | Fix |
@@ -270,6 +271,29 @@ org.albw.port -g [--trace-offcpu]`, report against the unstripped `libmain.so` (
 | 2026-11-23 | **scale 3: 60 fps at 59% GPU** (scale 2: 60 fps) | specialised fragment programs (`render/render.c` `spec_program`, `render/fraglight.c` `fraglight_spec_glsl`): the combiner configuration (sources, operands, modes, scales, buffer updates), alpha test, texture setup, fog and the lighting configuration (light count, LUTs, input selectors, per-light flags) baked in as straight-line GLSL, compiled on first use and cached (~30 programs on the title). Values stay uniforms. Default on Android; `ALBW_SPEC_SHADERS=1` turns it on for the PC, `=0` off |
 | 2026-11-23 | gameplay outside the house: 36-44 fps, CPU-bound (GPU 9%) | 84% of the game thread in `rec` / `pool_put`: the op pool's hash (`hash_bytes`, FNV-style multiply) has low bits that depend only on the inputs' low bits, and the table is indexed by the low bits, so ops differing in upper bits piled up in long probe chains. `op_hash` now finalises with `fmix64`: **60 fps steady in gameplay** (user-confirmed), GPU ~30% at render scale 2 |
 
+### Save states (Android)
+
+Work across runs, like on the PC. **On the RP5: hold L3 and press L to save, L3 + R to load** (the
+current slot, slot 1 unless changed in the Esc menu > File). States are in
+`/sdcard/Android/data/org.albw.port/files/share/albw-port/states/` (~12 MB each). Headless test:
+`ALBW_SS_AT=<frame>:save|load:<slot>` in `albw.env`.
+
+How it is made to work (everything a state points into must be at the same address in every run):
+- the game is `libalbw.so`, loaded by a small `libmain.so` (`android/loader/loader.c`, the library
+  SDLActivity loads) into a reserved range at **0x60000000** with `android_dlopen_ext`
+  (`ANDROID_DLEXT_RESERVED_ADDRESS`); heaps / stack slots (0x40000000-0x5C000000) and VRAM
+  (0x3E000000) were fixed already;
+- the static ranges to save come from the lld map (`tools/gen_ssmap.py --lld <base>`), shipped as
+  the APK asset `libalbw.ssmap`; `albw_android_main` passes it and the library path to
+  `albw_ss_android_init` (`/proc/self/exe` is the Java runtime);
+- the port's thread-locals (`t_id`, `t_self`, `t_sched`, `t_wp`, `t_ss`, `monitor`, `tls_slot`) live
+  at a fixed place in each thread's stack slot (`runtime/tlv.h`): Android's 32-bit emulated TLS keeps
+  them in malloc'd blocks, and restored frames that cached their addresses crashed (SIGBUS in
+  `ss_park`).
+Not done: states of another build (`runtime/ss_convert.c` reads the binary's symbol table, which the
+APK's stripped `libalbw.so` lacks), PC states on Android (different code). One of the first five test
+loads crashed (null pointer at 0x34, not reproduced since).
+
 ### Working on it from another machine
 
 You need: Linux with clang + lld (as `build.sh` installs), Python 3, the Android SDK + NDK, the
@@ -299,3 +323,4 @@ then commit.
 | 2026-11-23 | Stop A10: shadows translucent again (logic op NOOP of the shadow volumes emulated with the colour mask). The only logic op on the title is NOOP |
 | 2026-11-23 | Gameplay performance: 60 fps steady outside (op-pool hash fixed). Crash in `func_0052FBA0`: a virtual call that lost `this` (the method, e.g. `func_0036D6BC`, receives its own address on ARM); call site being located |
 | 2026-11-23 | Stop A11 fixed (lost `this` in `func_0030D120`). Open: the Sanctuary cutscene with Yuga shows the 3D scene squashed into a corner at render scale 2 (text fine): probably a render-to-texture pass that ignores the render scale |
+| 2026-11-23 | Save states on Android (see Save states): game library at a fixed address via a loader, lld map, thread-locals at fixed addresses. Saved and loaded across runs on the RP5 (4 of 5 loads fine, one crash not reproduced). L3+L save, L3+R load. Also: per-target viewport memory for render-to-texture passes (Yuga cutscene, still being fixed) |

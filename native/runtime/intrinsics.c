@@ -15,7 +15,12 @@
  *     v = *p; ok = hasExclusiveAccess(p); if (ok) *p = new; } while (!ok);
  * Per-thread monitor: ExclusiveAccess(p) records the address and the value seen; the store is only
  * allowed if nobody changed the word since (compare-and-swap semantics, as on the hardware). */
+#if defined(__ANDROID__)
+#include "tlv.h"
+#define monitor (albw_tlv()->monitor)   /* fixed address: runtime/tlv.h */
+#else
 static _Thread_local struct { void *addr; uint32_t seen; bool armed; } monitor;
+#endif
 
 void ExclusiveAccess(void *p) {
     monitor.addr = p;
@@ -88,7 +93,11 @@ void coprocessor_moveto(uint32_t cp, uint32_t op1, uint32_t op2, uint32_t rt, ui
  * fixed stack slot (runtime/pmem.c: the same address in every run, for persistent save states);
  * other threads a thread-local block (x86-64: low memory, the game keeps the address in 32-bit
  * words). */
+#if defined(__ANDROID__)
+#define tls_slot (albw_tlv()->tls_slot)
+#else
 static _Thread_local uint8_t *tls_slot;
+#endif
 void albw_tls_set(void *block) { tls_slot = block; }
 #if defined(__x86_64__)
 #include <sys/mman.h>
