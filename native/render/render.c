@@ -907,6 +907,43 @@ int render_transfer(const void *src, int sw, int sh, int sfmt, void *dst, int dw
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, t->fbo);
         rglBlitFramebuffer(0, (int)(sy0f * S), bw * S, (int)(sy1f * S), 0, (int)(dy0f * S), ow * S, (int)(dy1f * S), GL_COLOR_BUFFER_BIT,
                            (ax > 1 || ay > 1) ? GL_LINEAR : GL_NEAREST);
+        {   /* debug ALBW_PASS_DUMP_DIR=<dir>: for copies to a display in host frames 300..310 (or
+             * ALBW_PASS_DUMP_FRAMES=<a>-<b>), the source buffer and the display image as PPM files */
+            static const char *dd = (const char *)1;
+            static long fa = 300, fb = 310;
+            if (dd == (const char *)1) {
+                dd = getenv("ALBW_PASS_DUMP_DIR");
+                const char *fr = getenv("ALBW_PASS_DUMP_FRAMES");
+                if (fr) sscanf(fr, "%ld-%ld", &fa, &fb);
+            }
+            extern long g_plat_frames __attribute__((weak));
+            long fn = &g_plat_frames ? g_plat_frames : 0;
+            if (dd && d && fn >= fa && fn <= fb) {
+                static int seq;
+                const Surface *both[2] = {s, t};
+                for (int k = 0; k < 2; k++) {
+                    const Surface *x = both[k];
+                    int w = x->w * S, h = sph(x) * S;
+                    uint8_t *px = malloc((size_t)w * h * 4);
+                    if (!px) break;
+                    glBindFramebuffer(GL_READ_FRAMEBUFFER, x->fbo);
+                    rglReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+                    char path[512];
+                    snprintf(path, sizeof path, "%s/pass_%04d_f%ld_%s_%08lx_%dx%d.ppm", dd, seq, fn, k ? "dst" : "src",
+                             (unsigned long)(k ? (uintptr_t)dst : a), w, h);
+                    FILE *fp = fopen(path, "wb");
+                    if (fp) {
+                        fprintf(fp, "P6\n%d %d\n255\n", w, h);
+                        for (int y = h - 1; y >= 0; y--)
+                            for (int xx = 0; xx < w; xx++) fwrite(px + ((size_t)y * w + xx) * 4, 1, 3, fp);
+                        fclose(fp);
+                    }
+                    free(px);
+                }
+                seq++;
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, s->fbo);
+            }
+        }
         /* The colour buffer at 0x1F000080 is shared by the screens: each frame the top screen is
          * drawn into it and copied to its display (twice, one per eye), and every other frame the
          * bottom screen is drawn into rows 80-400 and copied to the bottom display. Once a region
@@ -929,6 +966,19 @@ int render_transfer(const void *src, int sw, int sh, int sfmt, void *dst, int dw
         glBindFramebuffer(GL_FRAMEBUFFER, R.cur_fbo);
         R.frag_dirty = true;
         if (d) d->valid = true;
+        /* The bottom screen's pass is a 320-row window into the shared buffer (copied from +80
+         * rows). The top-screen passes expect the whole buffer and some draw most of their content
+         * before setting viewport / scissor (the game's GraphicsContext emits those commands only
+         * when its cached copy changes, 0048AD94 / 0048AD08), so the bottom's 240x320 scissor and
+         * viewport leaked into the next top pass whenever the screens' lists interleaved that way:
+         * an 80-pixel strip of the top screen went black every other frame (README: Android boot
+         * stop A8). After the bottom screen's copy, both go back to the whole buffer.
+         * ALBW_KEEP_BOTTOM_VP=1 turns this off. */
+        if (d && off_rows > 0 && R.cur_c == s && !getenv("ALBW_KEEP_BOTTOM_VP")) {
+            R.vp[0] = 0; R.vp[1] = 0; R.vp[2] = s->w; R.vp[3] = s->h;
+            R.sc[0] = 0; R.sc[1] = 0; R.sc[2] = s->w; R.sc[3] = s->h;
+            R.frag_dirty = true;
+        }
         ok = 1;
         R.st.transfers++;
         if (g_trace || dumping()) rlog("transfer %#lx (+%d rows of %#lx) %dx%d -> %s %#lx %dx%d flip %d aa %d", (unsigned long)a,
@@ -1471,6 +1521,7 @@ void render_set_widescreen(int rows) {
 
 /* ================================================================== immediate API */
 
+
 void render_set_target(uintptr_t color, int cfmt, uintptr_t depth, int dfmt, int w, int h) {
     if (!render_ready()) return;
     lock();
@@ -1485,6 +1536,12 @@ void render_set_target(uintptr_t color, int cfmt, uintptr_t depth, int dfmt, int
 }
 
 void render_set_viewport(int x, int y, int w, int h) {
+    {   /* debug ALBW_PASS_TRACE: viewport changes with the draw count */
+        static int tr = -1; if (tr < 0) tr = getenv("ALBW_PASS_TRACE") != NULL;
+        extern long g_plat_frames __attribute__((weak));
+        if (tr && (R.vp[0] != x || R.vp[1] != y || R.vp[2] != w || R.vp[3] != h))
+            fprintf(stderr, "pass: f=%ld viewport %d,%d,%d,%d draws %lu\n", &g_plat_frames ? g_plat_frames : 0L, x, y, w, h, g_render_draws);
+    }
     R.vp[0] = x; R.vp[1] = y; R.vp[2] = w; R.vp[3] = h;
     R.frag_dirty = true;
 }
