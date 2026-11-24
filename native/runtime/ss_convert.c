@@ -52,7 +52,7 @@ extern uint32_t albw_ss_bias;
 #if UINTPTR_MAX == 0xFFFFFFFFu
 /* ------------------------------------------------------------------ images */
 typedef struct { uint32_t addr, size, flags; char name[24]; } Sec;
-typedef struct { uint32_t addr, size; const char *name, *file; uint8_t exec, sized; } Sym;
+typedef struct { uint32_t addr, size; const char *name, *file; uint8_t exec, sized, dup; } Sym;   /* dup: key not unique */
 typedef struct {
     Sec sec[96];
     int nsec;
@@ -131,7 +131,15 @@ static int image_syms(Image *im, const Elf32_Sym *st, uint32_t n, const char *st
     for (int i = 0; i < im->nsym; i++) {
         uint32_t h = fnv(im->sym[i].file, im->sym[i].name) & (im->hcap - 1);
         while (im->hash[h]) {
-            if (same_key(&im->sym[im->hash[h] - 1], &im->sym[i])) break;   /* first definition wins */
+            if (same_key(&im->sym[im->hash[h] - 1], &im->sym[i])) {
+                /* the same key twice (generated local copies sharing a name: 24 local
+                 * `_Z13func_001E30D0v` in the Android build, one at func_00321650's address):
+                 * ambiguous, never mapped through (a state's listener 11 delegate was remapped to
+                 * the wrong copy, TaskMainGame calc instead of 00321650: endless recursion, A16) */
+                im->sym[im->hash[h] - 1].dup = 1;
+                im->sym[i].dup = 1;
+                break;
+            }
             h = (h + 1) & (im->hcap - 1);
         }
         if (!im->hash[h]) im->hash[h] = (uint32_t)i + 1;
@@ -143,7 +151,7 @@ static const Sym *find_key(const Image *im, const Sym *k) {
     uint32_t h = fnv(k->file, k->name) & (im->hcap - 1);
     while (im->hash[h]) {
         const Sym *s = &im->sym[im->hash[h] - 1];
-        if (same_key(s, k)) return s;
+        if (same_key(s, k)) return s->dup || k->dup ? NULL : s;
         h = (h + 1) & (im->hcap - 1);
     }
     return NULL;
