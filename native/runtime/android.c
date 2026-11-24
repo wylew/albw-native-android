@@ -12,6 +12,7 @@
  * stdout / stderr go to logcat (tag "albw"). */
 #if defined(__ANDROID__)
 #define _GNU_SOURCE
+#include <errno.h>
 #include <android/log.h>
 #include <dlfcn.h>
 #include <pthread.h>
@@ -58,12 +59,16 @@ void albw_backtrace_symbols_fd(void *const *buf, int n, int fd) {
 
 /* ---- stdout / stderr -> logcat ---- */
 static int g_log_pipe[2];
-static void *log_thread(void *unused) {
-    (void)unused;
+static void *log_thread(void *arg) {
+    /* the read end in a local: g_log_pipe is static data, which a save-state load overwrites with
+     * the saving run's descriptor numbers. Reading that one failed, this thread exited, the pipe
+     * filled and the game froze in its next write to stderr (README: Android stop A14) */
+    int fd = (int)(intptr_t)arg;
     char buf[2048];
     size_t have = 0;
     for (;;) {
-        ssize_t n = read(g_log_pipe[0], buf + have, sizeof buf - 1 - have);
+        ssize_t n = read(fd, buf + have, sizeof buf - 1 - have);
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) break;
         have += (size_t)n;
         buf[have] = 0;
@@ -90,7 +95,7 @@ static void log_to_logcat(void) {
     dup2(g_log_pipe[1], 1);
     dup2(g_log_pipe[1], 2);
     pthread_t t;
-    if (pthread_create(&t, NULL, log_thread, NULL) == 0) pthread_detach(t);
+    if (pthread_create(&t, NULL, log_thread, (void *)(intptr_t)g_log_pipe[0]) == 0) pthread_detach(t);
 }
 
 /* ---- entry ---- */
