@@ -25,3 +25,6 @@ native/robust/systemic3/prev_*/
 
 # app icon (game artwork): used by android/app/build.gradle.kts, never committed
 /icon.png
+
+# HD texture packs (third-party game art): imported on the device, never committed
+/ALBW 4K*/
