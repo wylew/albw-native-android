@@ -7,6 +7,7 @@ __attribute__((weak)) void albw_sched_block_end(void) {}
 /* the same for the renderer (native/render/render.c: internal resolution) and the profiler
  * (native/runtime/prof.c), which builds without them (asset viewer, render tests) lack */
 #include "../render/render.h"
+#include "../render/hdtex.h"
 __attribute__((weak)) int render_ready(void) { return 0; }
 __attribute__((weak)) int render_get_scale(void) { return 1; }
 __attribute__((weak)) void render_set_scale(int scale) { (void)scale; }
@@ -458,6 +459,7 @@ int plat_init(const char *title, const PlatConfig *c) {
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
     snprintf(g_layout_base_title, sizeof g_layout_base_title, "%s", title);
     int have_layout_cfg = layout_load(&g_layout_cfg, NULL) == 0;  /* defaults if there is no layout.cfg yet */
+    hdtex_set_enabled(g_layout_cfg.hd_textures);   /* HD texture pack (render/hdtex.c) */
     /* Steam Deck Game Mode / any gamescope session: one window is shown at a time, full screen, and
      * there may be no keyboard. Joined window, full screen (this run only); on the first start the
      * large-top layout (the bottom screen stays reachable through the touchscreen). */
@@ -1687,6 +1689,7 @@ static void plat_composite(const Layout *l) {
 
 #include "menu.c"   /* Esc menu overlay (pauses the game inside plat_end_frame) */
 #include "states_ui.c"   /* save-state toasts, thumbnails, controller shortcuts */
+#include "hd_ui.c"   /* Esc menu > Textures: HD texture pack switch, Android import */
 
 /* debug: ALBW_FRAME_MS (kept out of plat_end_frame: its stack frame must stay as in older builds,
  * save states resume inside it) */
@@ -1837,6 +1840,7 @@ void plat_end_frame(void) {
     { void albw_gl_count_frame(void); albw_gl_count_frame(); }   /* render/glcount.c (ALBW_GL_COUNT) */
     ssui_pad_shortcuts();   /* L3 + L save, L3 + R load, L3 + D-pad slot (states_ui.c) */
     cheats_apply();   /* Esc menu > Cheats (cheats.c) */
+    hdui_poll();   /* HD texture pack import progress (hd_ui.c) */
     {   /* Debug > Show FPS: game frames per second in the window title, updated twice a second */
         static uint64_t t0; static int n, shown;
         n++;

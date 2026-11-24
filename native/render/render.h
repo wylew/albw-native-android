@@ -336,3 +336,5 @@ int render_read_surface(uintptr_t color_addr, uint8_t *rgba, int *w, int *h);
 /* counters for traces */
 typedef struct { uint64_t ops_run, ops_recorded, ops_pooled, fills, transfers, draws, tex_uploads, surfaces; } RStats;
 RStats render_stats(void);
+/* HD texture packs (render/hdtex.c): upload every 2D texture again after a switch / import */
+void render_hdtex_refresh(void);

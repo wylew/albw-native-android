@@ -12,6 +12,8 @@
  *  Video  Windows (separate / joined), Layout preset, Swap screens, Filter, Integer scale,
  *         Resolution (internal render scale 1x..8x), Fullscreen, Edit layout (the F3 mouse editor),
  *         Menu style (this menu as a bar across the top or as a centered panel with the same tabs)
+ *  Textures  HD textures on / off, Import pack (Android: system folder picker, copies the pack's
+ *         tex1_*.png into the app's textures folder), Status (scan again) - platform/hd_ui.c
  *  Controls  Device (keyboard / controller), one row per input.cfg action (Enter: press the new
  *         key / button, - or Delete: clear), Reset to defaults; saved to input.cfg at once
  *  Help   Copy log to clipboard (header + end of the log file, for GitHub issues), Open log folder,
@@ -75,7 +77,7 @@ static MenuVtx menu_vtx[MENU_MAX_VTX];
 static int menu_nv;
 
 enum { MI_RESUME, MI_WINDOWS, MI_SINGLE, MI_PRESET, MI_SWAP, MI_FILTER, MI_INTEGER, MI_RES, MI_FULLSCREEN, MI_EDIT,
-       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_DBG_HUD, MI_CHEAT_RESET, MI_COUNT };
+       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_DBG_HUD, MI_CHEAT_RESET, MI_HD_ON, MI_HD_IMPORT, MI_HD_STATUS, MI_COUNT };
 
 typedef struct { const char *title; const int *items; int n; const char *const *notes; } MenuDef;
 #define MI_BIND_BASE 200   /* MI_BIND_BASE + InAction: one Controls row per action */
@@ -94,6 +96,10 @@ static const char *const menu_help_notes[] = {"Copy log, then paste it into the 
                                               "The log holds no ROM data or personal files", NULL};
 static const int menu_about_items[] = {MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE};
 static const char *const menu_about_notes[] = {"Unofficial native port of A Link Between Worlds", "Needs your own ROM; none is included", NULL};
+static const int menu_tex_items[] = {MI_HD_ON, MI_HD_IMPORT, MI_HD_STATUS};
+static const char *const menu_tex_notes[] = {"Citra / Azahar texture packs (tex1_*.png files),",
+                                             "e.g. ALBW 4K. Import copies one into the app's",
+                                             "textures folder; select Status to scan it again", NULL};
 static const int menu_cheat_items[] = {MI_CHEAT_BASE + 0, MI_CHEAT_BASE + 1, MI_CHEAT_BASE + 2, MI_CHEAT_BASE + 3,
                                        MI_CHEAT_BASE + 4, MI_CHEAT_BASE + 5, MI_CHEAT_BASE + 6, MI_CHEAT_BASE + 7,
                                        MI_CHEAT_BASE + 8, MI_CHEAT_BASE + 9, MI_CHEAT_RESET};
@@ -107,6 +113,7 @@ static const MenuDef menu_defs[] = {
     {"File", menu_file_items, MENU_N(menu_file_items), NULL},
     {"States", menu_states_items, MENU_N(menu_states_items), menu_states_notes},
     {"Video", menu_video_items, MENU_N(menu_video_items), NULL},
+    {"Textures", menu_tex_items, MENU_N(menu_tex_items), menu_tex_notes},
     {"Controls", menu_controls_items, MENU_N(menu_controls_items), menu_controls_notes},
     {"Help", menu_help_items, MENU_N(menu_help_items), menu_help_notes},
     {"About", menu_about_items, MENU_N(menu_about_items), menu_about_notes},
@@ -118,6 +125,10 @@ static const MenuDef menu_defs[] = {
 /* platform/states_ui.c (#included after this file) */
 static GLuint ssui_thumb(int slot);
 static void ssui_save_requested(int slot);
+/* platform/hd_ui.c (#included after this file) */
+static void hdui_import(void);
+static void hdui_poll(void);
+static void hdui_set_enabled(int on);
 static const int menu_speeds[] = {25, 50, 100, 200, 0};   /* Debug > Speed, percent (0 = unlimited) */
 
 static const char *MENU_VS =
@@ -247,6 +258,9 @@ static void menu_label(int i, char *buf, size_t n) {
     switch (i) {
     case MI_RESUME: snprintf(buf, n, "Resume"); break;
     case MI_CHEAT_RESET: snprintf(buf, n, "Reset rupees to 0"); break;
+    case MI_HD_ON: snprintf(buf, n, "HD textures    < %s >", g_layout_cfg.hd_textures ? "On" : "Off"); break;
+    case MI_HD_IMPORT: snprintf(buf, n, "Import pack..."); break;
+    case MI_HD_STATUS: snprintf(buf, n, "Status: %s", hdtex_status()); break;
     case MI_BIND_DEV: snprintf(buf, n, "Device         < %s >", g_bind_pad ? "Controller" : "Keyboard"); break;
     case MI_BIND_RESET: snprintf(buf, n, "Reset %s controls to defaults", g_bind_pad ? "controller" : "keyboard"); break;
     case MI_WINDOWS: snprintf(buf, n, "Windows        < %s >", g_separate ? "Separate" : "Joined"); break;
@@ -567,6 +581,9 @@ static void menu_activate(int i, int dir) {
         return;
     }
     switch (i) {
+    case MI_HD_ON: hdui_set_enabled(!g_layout_cfg.hd_textures); break;
+    case MI_HD_IMPORT: hdui_import(); break;
+    case MI_HD_STATUS: hdtex_rescan(); render_hdtex_refresh(); snprintf(g_menu_note, sizeof g_menu_note, "Scanned: %s", hdtex_status()); break;
     case MI_CHEAT_RESET: g_cheat_reset_rupees = 1; snprintf(g_menu_note, sizeof g_menu_note, "Rupees reset to 0"); break;
     case MI_BIND_DEV: g_bind_pad ^= 1; break;
     case MI_BIND_RESET: {
@@ -843,6 +860,7 @@ static void menu_draw(int ww, int wh) {
         menu_image(px, py, pw, ph, 1);
         menu_flush(ww, wh, thumb, 1);
     }
+    ssui_draw(ww, wh);   /* toasts (an HD texture import's progress) over the menu */
 }
 
 /* modal loop: the last game frame + the menu until it closes (game paused) */
@@ -851,6 +869,7 @@ static void menu_run(void) {
     while (g_menu_open) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) menu_event(&e);
+        hdui_poll();   /* an HD texture import started from the menu */
         if (!g_menu_open) break;
         if (!g_separate) {
             plat_layout_update();

@@ -370,6 +370,31 @@ ranch cheat is left out on purpose.
 Build fix found on the way: `tools/link_android.sh` / `tools/link.sh` rebuilt platform.o only for
 a fixed list of included files; any file in `native/platform/` counts now.
 
+### HD textures
+
+`render/hdtex.c` (pack index, CityHash64, PNG decoder, worker thread, cache), the hook in
+`render/render.c` (`tex_upload`, `bind_unit`), `platform/hd_ui.c` and the Esc menu's **Textures**
+tab (HD textures on / off, `hd_textures` in layout.cfg, default on; Import pack...; Status = scan
+again). Packs in the Citra / Azahar format (`tex1_<w>x<h>_<hash>_<fmt>_mip0.png`, e.g. "ALBW 4K" by
+Henriko Magnifico) anywhere under the textures folder: `$ALBW_TEXTURES_DIR`, else
+`$ALBW_DATA_DIR/textures`, else `~/textures` (Android: the app's files folder / textures).
+- Matching: CityHash64 (v1.1) of the original texture's raw level-0 bytes, plus width, height and
+  PICA format, as Citra (see the 2026-11-24 log entry for how it was established).
+- A hit replaces level 0 with the PNG (bigger) and gets a generated mip chain; each draw's mip range
+  is shifted by log2 of the scale. PNGs decode on a worker thread: the original shows until the HD
+  image is ready (no hitch). Decoded images stay cached (384 MiB cap, least recently used evicted).
+- **Import (Android)**: the system folder picker (`AlbwActivity.importTexturePack`, Storage
+  Access Framework: no storage permission needed), then a Java thread copies every `tex1_*.png`
+  and `pack.json` found at any depth into `files/textures/<folder name>/` with progress shown;
+  the folder is scanned again and every texture uploaded again. Android does not allow choosing
+  Download itself or the storage root: pick the pack's folder.
+- Checked on the RP5: import of ALBW 4K from Download/ALBW4K (539 files incl. its region subfolder),
+  538 textures indexed, Hyrule Castle town drawn with the HD grass / cliffs / stones / water at 60
+  fps. Region: the pack ships the USA folder only; its hashes fit the EU textures seen so far.
+- Debug: `ALBW_HDTEX=0` off, `ALBW_HDTEX_LOG=1` logs every decode. Not done: a disk cache of
+  decoded images (decode cost on first sight only), Import on the desktop (copy the files into the
+  folder instead).
+
 ### Shader cache
 
 `gl_program` (`platform/platform.c`) stores each linked program's binary (`glGetProgramBinary`) in
@@ -427,3 +452,4 @@ then commit.
 | 2026-11-24 | Cheats tab: value cheats (rupees, materials, Maiamais, hearts, keys, power meter, reset rupees) on Link's status block, checked on the RP5 |
 | 2026-11-24 | Code cheats: Invincible (checked: hearts stay full under Buzz Blob shocks), Money doesn't decrease, items / painting cost no energy (hooks in the recompiled functions); platform.o staleness fix in the link scripts |
 | 2026-11-24 | HD texture pack feasibility (Citra/Azahar format, "ALBW 4K 2.0b" by Henriko Magnifico: `tex1_<w>x<h>_<hash>_<fmt>_mip0.png`, 538 files, USA folder 00040000000EC300 only): the hash is **CityHash64 of the texture's raw 3DS bytes, level 0** (pack.json `use_new_hash` notwithstanding; xxHash and decoded-pixel variants tested, no match). 45 of the 73 textures in use in the user's Hyrule Castle town state matched (USA hashes fit the EU textures); PNGs are top row first (upload flipped to GL's bottom-first). Not implemented yet (plan: hash at upload in render.c, lazy PNG load on a worker, disk cache, Esc menu toggle / pack folder) |
+| 2026-11-24 | HD textures: pack support (render/hdtex.c, hook in render.c), Esc menu > Textures, Android import through the system folder picker. Checked on the RP5 with ALBW 4K (538 textures, 60 fps) |

@@ -34,6 +34,7 @@
 #include "effects.h"
 #include "prim.h"
 #include "texdecode.h"
+#include "hdtex.h"
 
 /* ================================================================== GL functions beyond gl.h */
 
@@ -243,6 +244,8 @@ typedef struct {
     int p_wrap_s, p_wrap_t, p_min, p_mag; /* last sampler params set */
     int p_maxl, p_minl;                   /* last per-draw LOD range set (-1 none) */
     int up_levels;                        /* levels tex_upload actually stored (<= levels: stops under 8x8) */
+    uint8_t hd, hd_shift, hd_pending;     /* HD pack image uploaded (hdtex.c), log2 of its scale, waiting */
+    int hd_levels;                        /* levels of the HD image's generated mip chain */
 } TexEnt;
 
 typedef struct {
@@ -1214,8 +1217,46 @@ static void tex_upload(TexEnt *t) {
             if (genmip) genmip(target);
         }
     }
+    /* HD texture pack (render/hdtex.c): the original's raw level 0 hashed (CityHash64, as Citra);
+     * a decoded replacement replaces level 0 and gets a generated mip chain, one still being
+     * decoded keeps the original until hdtex_poll reports it (render_frame_end) */
+    t->hd = t->hd_pending = 0;
+    if (!t->cube && hdtex_active()) {
+        uint64_t hh = hdtex_cityhash64((const void *)t->addr, texfmt_size(t->fmt, t->w, t->h));
+        const uint8_t *px;
+        int pw, ph;
+        int r = hdtex_get(hh, t->w, t->h, t->fmt, &px, &pw, &ph);
+        if (r == 1) {
+            static void (*genmip)(GLenum);
+            if (!genmip) genmip = (void (*)(GLenum))SDL_GL_GetProcAddress("glGenerateMipmap");
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, pw, ph, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+            int nl = 1;
+            for (int m = pw > ph ? pw : ph; m > 1; m >>= 1) nl++;
+            if (!genmip) nl = 1;
+            /* the whole chain first: glGenerateMipmap fills only up to MAX_LEVEL, which still held
+             * the original's level count (the HD levels above stayed undefined: sampled black) */
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, nl - 1);
+            if (genmip) genmip(GL_TEXTURE_2D);
+            int sh = 0;
+            while (sh < 4 && (t->w << (sh + 1)) <= pw) sh++;
+            t->hd = 1;
+            t->hd_shift = (uint8_t)sh;
+            t->hd_levels = nl;
+        } else if (r == 0) {
+            t->hd_pending = 1;
+        }
+    }
     t->dirty = false;
     R.st.tex_uploads++;
+}
+
+/* HD textures switched on / off or a pack imported: upload every 2D texture again */
+void render_hdtex_refresh(void) {
+    lock();
+    for (size_t i = 0; i < R.ntex; i++)
+        if (!R.tex[i].cube) R.tex[i].dirty = true;
+    unlock();
 }
 
 static TexEnt *tex_lookup(const RTexUnit *u) {
@@ -1331,6 +1372,13 @@ static void bind_unit(int i) {
     int eff = want < have ? want : have;                                                    /* mipmap-incomplete samples black */
     if (eff < 1) eff = 1;
     int minl = u->min_level < eff ? u->min_level : eff - 1;
+    if (t->hd) {   /* HD image: the same range in its (2^shift times larger) levels */
+        int e2 = eff + t->hd_shift;
+        if (e2 > t->hd_levels) e2 = t->hd_levels;
+        if (minl) minl += t->hd_shift;
+        if (minl > e2 - 1) minl = e2 - 1;
+        eff = e2;
+    }
     if (t->p_maxl != eff - 1) { glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, eff - 1); t->p_maxl = eff - 1; }
     if (t->p_minl != minl) { rglTexParameterf(target, GL_TEXTURE_MIN_LOD, (float)minl); t->p_minl = minl; }
     sampler_params(target, u, &t->p_wrap_s, &t->p_wrap_t, &t->p_min, &t->p_mag, eff);
@@ -2566,6 +2614,9 @@ void render_frame_end(void) {
     if (dumping()) rlog("dump: ==== end of render frame %lu", (unsigned long)R.frame);
     R.frame++;
     R.frag_dirty = R.tev_dirty = R.vsf_dirty = true; /* plat_end_frame changed GL state */
+    if (hdtex_poll())   /* HD images decoded meanwhile: upload the textures waiting for them */
+        for (size_t i = 0; i < R.ntex; i++)
+            if (R.tex[i].hd_pending) { R.tex[i].hd_pending = 0; R.tex[i].dirty = true; }
     {   /* Pre-build the h3d program variants, one per frame: compiling the ones a new area needs
          * inside its loading frame (6 compile + link in the GL driver) was most of the overworld
          * area-switch hitch (77-95 ms frame, BOOT_LOG 156). Valid variants: skin 0..4 x light
