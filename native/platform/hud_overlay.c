@@ -1,6 +1,7 @@
 /* HUD overlay (included by platform.c after selector.c): the bottom screen's rupee counter and Y / B
  * item buttons drawn on the main screen while the bottom screen is not visible (single-screen
- * mode showing the top screen). Debug > HUD overlay, layout.cfg hud_overlay (default on).
+ * mode showing the top screen). Debug > HUD overlay, layout.cfg hud_overlay (default off: work in
+ * progress).
  *
  * Pixels, not game data: the regions are copied from the bottom screen's image (screens[
  * SCREEN_BOTTOM], drawn by the game every frame even when not shown). They are only where the

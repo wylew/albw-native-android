@@ -54,7 +54,7 @@ void layout_defaults(LayoutConfig *c) {
     c->snap = 1;
     c->custom_front = LAYOUT_SCREEN_BOTTOM;
     c->confirm_load = 1;
-    c->hud_overlay = 1;
+    c->hud_overlay = 0;   /* off by default: work in progress (README: HUD overlay) */
 #if defined(__ANDROID__)
     c->menu_centered = 1;   /* a controller-sized panel, not a bar across the top */
 #endif

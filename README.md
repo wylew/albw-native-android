@@ -334,7 +334,8 @@ data layout) do not load.
 
 ### HUD overlay (single-screen mode)
 
-`platform/hud_overlay.c`, Esc menu Debug > HUD overlay (`hud_overlay` in layout.cfg, default on):
+`platform/hud_overlay.c`, Esc menu Debug > HUD overlay (`hud_overlay` in layout.cfg, **default off**,
+work in progress: to be refined later):
 while the bottom screen is hidden, its rupee counter is drawn in the main screen's top right
 corner and its B / Y item buttons in the bottom right, at the top screen's scale with soft edges.
 Copied from the bottom screen's image (the game draws it every frame): regions measured on the

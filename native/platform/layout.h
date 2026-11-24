@@ -27,7 +27,7 @@
  *   render_scale 1            internal resolution: 1..8 x the 3DS screens (ALBW_RENDER_SCALE overrides)
  *   menu_style bar            Esc menu: bar (across the top) or centered (a panel in the middle)
  *   confirm_load 1            quick save-state loads (L3+R, F7) ask for a second press
- *   hud_overlay 1             bottom-screen rupees and Y / B items on the main screen (single screen)
+ *   hud_overlay 0             bottom-screen rupees and Y / B items on the main screen (single screen)
  *   snap 1                    custom editor: snap to window edges/centre, the other screen, integer sizes
  *   custom_front bottom       screen drawn last (on top) where custom rectangles overlap
  *   widescreen 0              1 = 16:9 top screen: the game draws a wider view (F10)
@@ -78,7 +78,7 @@ typedef struct {
     int render_scale;        /* 1..8 internal resolution multiple */
     int menu_centered;       /* Esc menu style: 0 bar across the top, 1 centered panel */
     int confirm_load;        /* quick loads (L3+R, F7) ask twice: 1 (default) or 0 */
-    int hud_overlay;         /* rupees + Y / B on the main screen when the bottom one is hidden: 1 (default) */
+    int hud_overlay;         /* rupees + Y / B on the main screen when the bottom one is hidden: 0 (default) or 1 */
     int custom_front;        /* LAYOUT_SCREEN_TOP / _BOTTOM */
     LayoutRect custom[2];    /* normalized to the window */
     int custom_visible[2];
