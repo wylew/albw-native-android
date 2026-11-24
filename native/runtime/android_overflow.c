@@ -21,7 +21,7 @@
 #define STACKS_LO 0x58000000u   /* runtime/pmem.c PMEM_STACKS */
 #define STACKS_HI 0x5C000000u
 
-static struct sigaction g_prev;
+static struct sigaction g_prev, g_prev_bus;
 static uintptr_t g_text_lo, g_text_hi;
 
 #include <stdlib.h>
@@ -145,6 +145,7 @@ static void handler(int sig, siginfo_t *si, void *uc_v) {
      * re-runs the faulting instruction, and the system's handler writes the tombstone as before */
     (void)sig;
     sigaction(SIGSEGV, &g_prev, NULL);
+    sigaction(SIGBUS, &g_prev_bus, NULL);
 }
 
 static int phdr_cb(struct dl_phdr_info *info, size_t size, void *data) {
@@ -167,6 +168,7 @@ void albw_overflow_report_install(void) {
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGSEGV, &sa, &g_prev);
+    sigaction(SIGBUS, &sa, &g_prev_bus);   /* misaligned addresses (float bits used as a pointer) */
 }
 #else
 void albw_overflow_report_install(void) {}
