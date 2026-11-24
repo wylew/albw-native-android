@@ -119,6 +119,8 @@ typedef void GLvoid;
     X(void, glBindFramebuffer, (GLenum, GLuint)) \
     X(void, glFramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint)) \
     X(GLenum, glCheckFramebufferStatus, (GLenum)) \
+    X(void, glBlitFramebuffer, (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum)) \
+    X(void, glUniform2f, (GLint, GLfloat, GLfloat)) \
     X(void, glGenRenderbuffers, (GLsizei, GLuint *)) \
     X(void, glBindRenderbuffer, (GLenum, GLuint)) \
     X(void, glRenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei)) \

@@ -17,7 +17,8 @@
  *  Help   Copy log to clipboard (header + end of the log file, for GitHub issues), Open log folder,
  *         Report a problem (GitHub), log path
  *  About  Version (from VERSION) and build date / time
- *  Debug  Logging (starts a log file when run from a terminal), Particles, Fog, Show FPS (window title), Speed (25 % .. unlimited). The retail code has
+ *  Debug  Logging (starts a log file when run from a terminal), Particles, Fog, Show FPS (window title), Speed (25 % .. unlimited),
+ *         HUD overlay (rupees and Y / B on the main screen in single-screen mode: platform/hud_overlay.c). The retail code has
  *         no hidden debug menu to expose (searched: the only developer leftovers are the course
  *         list's E3Field / Test* names, whose course files are not on the ROM, the Dbg:* heaps and
  *         the event flag name cmn_debug_goal_on), so this menu holds the port's own switches.
@@ -71,7 +72,7 @@ static MenuVtx menu_vtx[MENU_MAX_VTX];
 static int menu_nv;
 
 enum { MI_RESUME, MI_WINDOWS, MI_SINGLE, MI_PRESET, MI_SWAP, MI_FILTER, MI_INTEGER, MI_RES, MI_FULLSCREEN, MI_EDIT,
-       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_COUNT };
+       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_DBG_HUD, MI_COUNT };
 
 typedef struct { const char *title; const int *items; int n; const char *const *notes; } MenuDef;
 #define MI_BIND_BASE 200   /* MI_BIND_BASE + InAction: one Controls row per action */
@@ -89,7 +90,7 @@ static const char *const menu_help_notes[] = {"Copy log, then paste it into the 
                                               "The log holds no ROM data or personal files", NULL};
 static const int menu_about_items[] = {MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE};
 static const char *const menu_about_notes[] = {"Unofficial native port of A Link Between Worlds", "Needs your own ROM; none is included", NULL};
-static const int menu_debug_items[] = {MI_DBG_LOG, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED};
+static const int menu_debug_items[] = {MI_DBG_LOG, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_DBG_HUD};
 static const char *const menu_debug_notes[] = {"Game debug menus: none in the retail code", "(dev courses E3Field / Test*: not on the ROM)",
                                                NULL};
 #define MENU_N(a) ((int)(sizeof(a) / sizeof(a)[0]))
@@ -275,6 +276,7 @@ static void menu_label(int i, char *buf, size_t n) {
     case MI_DBG_EFT: snprintf(buf, n, "Particles      < %s >", g_dbg_eft_off ? "Off" : "On"); break;
     case MI_DBG_FOG: snprintf(buf, n, "Fog            < %s >", g_dbg_fog_off ? "Off" : "On"); break;
     case MI_DBG_FPS: snprintf(buf, n, "Show FPS       < %s >", g_dbg_show_fps ? "On (title bar)" : "Off"); break;
+    case MI_DBG_HUD: snprintf(buf, n, "HUD overlay    < %s >", g_layout_cfg.hud_overlay ? "On (single screen)" : "Off"); break;
     case MI_DBG_SPEED:
         if (g_dbg_speed) snprintf(buf, n, "Speed          < %d %% >", g_dbg_speed);
         else snprintf(buf, n, "Speed          < Unlimited >");
@@ -632,6 +634,7 @@ static void menu_activate(int i, int dir) {
         break;
     case MI_DBG_FOG: g_dbg_fog_off ^= 1; break;
     case MI_DBG_FPS: g_dbg_show_fps ^= 1; break;
+    case MI_DBG_HUD: g_layout_cfg.hud_overlay ^= 1; plat_layout_changed(); break;
     case MI_DBG_SPEED: {
         int n = MENU_N(menu_speeds), k = 0;
         while (k < n && menu_speeds[k] != g_dbg_speed) k++;

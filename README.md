@@ -332,6 +332,17 @@ data layout) do not load.
   the converter now compares the whole ARM prologue (it stopped at the first `sub sp` and would
   have accepted a changed frame).
 
+### HUD overlay (single-screen mode)
+
+`platform/hud_overlay.c`, Esc menu Debug > HUD overlay (`hud_overlay` in layout.cfg, default on):
+while the bottom screen is hidden, its rupee counter is drawn in the main screen's top right
+corner and its B / Y item buttons in the bottom right, at the top screen's scale with soft edges.
+Copied from the bottom screen's image (the game draws it every frame): regions measured on the
+world map page (3DS bottom pixels: rupees 254,3 65x24; Y 256,106 60x58; B 280,172 39x34). The
+page is checked every 10 frames from a few pixels (as `selector.c`); the regions are copied into a
+cache texture only on the map page, so other pages (Items, Gear, dungeon map, warp menu) keep
+the last good copy. Checked on the RP5 (slot 2, Hyrule Castle town).
+
 ### Shader cache
 
 `gl_program` (`platform/platform.c`) stores each linked program's binary (`glGetProgramBinary`) in
@@ -385,3 +396,4 @@ then commit.
 | 2026-11-24 | Save-state UI (States tab, toasts with pictures, L3 + D-pad slots, confirm load) and shader program binary cache, both checked on the RP5: messages and pictures shown, an older build's state still loads, shader build time 8.4 s -> 0.3 s |
 | 2026-11-24 | Stop A18 fixed (D-pad right crash: dropped call arguments in `003517A4`) |
 | 2026-11-24 | D-pad camera look-around checked (camera trace `ALBW_H3D_CAMTRACE`, autopilot holds): left / right pan and spring back (right was only blocked by the area edge at the test spot); up / down do nothing. Unknown whether the original pans vertically; left as is (user's call). Controller mapping verified (defaults, D-pad reaches the game as the 3DS D-pad) |
+| 2026-11-24 | HUD overlay: rupees (top right) and B / Y items (bottom right) from the bottom screen on the main screen in single-screen mode; Debug menu toggle |
