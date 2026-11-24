@@ -24,6 +24,9 @@ EXCLUDE = [
     r"/native/platform/", r"/native/render/", r"/native/audio/output\.o$", r"/native/audio/fx\.o$",
     r"/native/audio/mixer\.o$",
     r"/native/runtime/(prof|crash|fatal|entry|lowmem|savestate|ss_ctx|ss_convert|pmem)\.o$",
+    # Android runtime: per-run handles (the log pipe's descriptors, the per-thread variables' pthread
+    # key): restoring the saving run's values froze the game (A14) / crashed loads in ss_park (A15)
+    r"/native/runtime/(android|android_watch|android_overflow|tlv)\.o$",
     r"/native/sdk/(os|gfx|fs|memory|snd|light)\.o$",
 ]
 

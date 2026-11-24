@@ -146,6 +146,8 @@ int albw_android_main(int argc, char **argv) {
                     di.dli_fname, mlen, di.dli_fbase);
         }
     }
+    void albw_overflow_report_install(void);   /* android_overflow.c: stack overflow report */
+    albw_overflow_report_install();
     void albw_watch_start(void);   /* android_watch.c: ALBW_WATCH debug watchpoint */
     albw_watch_start();
     return main(argc, argv);
