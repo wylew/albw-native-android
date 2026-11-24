@@ -616,3 +616,5 @@ int albw_ss_slot_info(int slot, char *buf, size_t n) {
 }
 
 const char *albw_ss_note(void) { return g_note; }
+/* the slot's state file (platform/states_ui.c keeps a thumbnail next to it: <path>.thumb) */
+void albw_ss_slot_path(int slot, char *buf, size_t n) { slot_path(slot, buf, n); }

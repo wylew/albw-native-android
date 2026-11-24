@@ -20,6 +20,7 @@ __attribute__((weak)) void prof_frame(void) {}
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/stat.h>
 #include <signal.h>
 
 /* Screen layout engine (presets, custom layout, touch mapping), shared with the Qt frontend.
@@ -125,10 +126,113 @@ static GLuint shader(GLenum type, const char *src) {
     return s;
 }
 
+/* Program binary cache (README: Android performance). Compiling a GLSL program costs Adreno
+ * 20-100 ms; the renderer builds a specialised fragment program the first time each material
+ * combination is drawn, so every new area hitched while it compiled. The linked binary of each
+ * program (glGetProgramBinary, GLES 3.0 / GL 4.1) is kept in
+ *   $ALBW_SHADER_CACHE_DIR, else $XDG_CACHE_HOME/albw-port/shaders, else ~/.cache/albw-port/shaders
+ * (Android: .cache/albw-port/shaders in the app's files folder), one file per program named by a
+ * 64-bit hash of the GL vendor / renderer / version strings and both sources; loaded with
+ * glProgramBinary next time (a driver update changes the hash; a binary the driver rejects is
+ * deleted and the program compiled). ALBW_SHADER_CACHE=0: off. Missing entry points: off. */
+#define PB_RETRIEVABLE_HINT 0x8257
+#define PB_LENGTH 0x8741
+static void (*pb_get)(GLuint, GLsizei, GLsizei *, GLenum *, void *);
+static void (*pb_load)(GLuint, GLenum, const void *, GLsizei);
+static void (*pb_param)(GLuint, GLenum, GLint);
+static int pb_on = -1;
+static char pb_dir[1024];
+static uint64_t pb_driver;
+static unsigned pb_hits, pb_misses;
+static uint64_t pb_fnv(uint64_t h, const char *s) {
+    for (; s && *s; s++) h = (h ^ (uint8_t)*s) * 1099511628211ull;
+    return (h ^ 0xFF) * 1099511628211ull;   /* separator */
+}
+static int pb_init(void) {
+    if (pb_on >= 0) return pb_on;
+    pb_on = 0;
+    const char *e = getenv("ALBW_SHADER_CACHE");
+    if (e && !strcmp(e, "0")) return 0;
+    pb_get = (void (*)(GLuint, GLsizei, GLsizei *, GLenum *, void *))SDL_GL_GetProcAddress("glGetProgramBinary");
+    pb_load = (void (*)(GLuint, GLenum, const void *, GLsizei))SDL_GL_GetProcAddress("glProgramBinary");
+    pb_param = (void (*)(GLuint, GLenum, GLint))SDL_GL_GetProcAddress("glProgramParameteri");
+    if (!pb_get || !pb_load) { fprintf(stderr, "shader cache: off (no program binaries in this GL)\n"); return 0; }
+    const char *d = getenv("ALBW_SHADER_CACHE_DIR"), *x = getenv("XDG_CACHE_HOME"), *h = getenv("HOME");
+    if (d && *d) snprintf(pb_dir, sizeof pb_dir, "%s", d);
+    else if (x && *x) snprintf(pb_dir, sizeof pb_dir, "%s/albw-port/shaders", x);
+    else if (h && *h) snprintf(pb_dir, sizeof pb_dir, "%s/.cache/albw-port/shaders", h);
+    else return 0;
+    for (char *q = pb_dir + 1; *q; q++)   /* mkdir -p */
+        if (*q == '/') { *q = 0; mkdir(pb_dir, 0755); *q = '/'; }
+    mkdir(pb_dir, 0755);
+    pb_driver = 1469598103934665603ull ^ 2;   /* format version 2 */
+    pb_driver = pb_fnv(pb_driver, (const char *)glGetString(GL_VENDOR));
+    pb_driver = pb_fnv(pb_driver, (const char *)glGetString(GL_RENDERER));
+    pb_driver = pb_fnv(pb_driver, (const char *)glGetString(GL_VERSION));
+    fprintf(stderr, "shader cache: %s\n", pb_dir);
+    return pb_on = 1;
+}
+static void pb_path(uint64_t key, char *buf, size_t n) { snprintf(buf, n, "%s/%016llx.bin", pb_dir, (unsigned long long)key); }
+/* a cached binary into a new program: the program, or 0 */
+static GLuint pb_try(uint64_t key) {
+    char path[1100];
+    pb_path(key, path, sizeof path);
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    char magic[8];
+    uint32_t hdr[2];
+    void *bin = NULL;
+    GLuint p = 0;
+    if (fread(magic, 1, 8, f) == 8 && !memcmp(magic, "ALBWPB02", 8) && fread(hdr, 4, 2, f) == 2 &&
+        hdr[1] > 0 && hdr[1] < (64u << 20) && (bin = malloc(hdr[1])) && fread(bin, 1, hdr[1], f) == hdr[1]) {
+        p = glCreateProgram();
+        pb_load(p, (GLenum)hdr[0], bin, (GLsizei)hdr[1]);
+        GLint ok = 0;
+        glGetProgramiv(p, GL_LINK_STATUS, &ok);
+        if (!ok) { glDeleteProgram(p); p = 0; }
+    }
+    free(bin);
+    fclose(f);
+    if (!p) remove(path);   /* stale or rejected: compile again */
+    return p;
+}
+static void pb_store(uint64_t key, GLuint p) {
+    GLint len = 0;
+    glGetProgramiv(p, PB_LENGTH, &len);
+    if (len <= 0) return;
+    void *bin = malloc((size_t)len);
+    if (!bin) return;
+    GLenum fmt = 0;
+    GLsizei got = 0;
+    pb_get(p, len, &got, &fmt, bin);
+    char path[1100], tmp[1200];
+    pb_path(key, path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = got > 0 ? fopen(tmp, "wb") : NULL;
+    if (f) {
+        uint32_t hdr[2] = {(uint32_t)fmt, (uint32_t)got};
+        int ok = fwrite("ALBWPB02", 1, 8, f) == 8 && fwrite(hdr, 4, 2, f) == 2 && fwrite(bin, 1, (size_t)got, f) == (size_t)got;
+        ok &= fclose(f) == 0;
+        if (ok) rename(tmp, path); else remove(tmp);
+    }
+    free(bin);
+}
+
 GLuint gl_program(const char *vs, const char *fs) {
+    uint64_t key = 0;
+    if (pb_init()) {
+        key = pb_fnv(pb_fnv(pb_driver, vs), fs);
+        GLuint c = pb_try(key);
+        if (c) {
+            if ((++pb_hits + pb_misses) % 200 == 0) fprintf(stderr, "shader cache: %u loaded, %u compiled\n", pb_hits, pb_misses);
+            return c;
+        }
+        if ((pb_hits + ++pb_misses) % 200 == 0) fprintf(stderr, "shader cache: %u loaded, %u compiled\n", pb_hits, pb_misses);
+    }
     GLuint p = glCreateProgram(), v = shader(GL_VERTEX_SHADER, vs), f = shader(GL_FRAGMENT_SHADER, fs);
     glAttachShader(p, v);
     glAttachShader(p, f);
+    if (key && pb_param) pb_param(p, PB_RETRIEVABLE_HINT, 1);
     glLinkProgram(p);
     GLint ok;
     glGetProgramiv(p, GL_LINK_STATUS, &ok);
@@ -140,6 +244,7 @@ GLuint gl_program(const char *vs, const char *fs) {
     }
     glDeleteShader(v);
     glDeleteShader(f);
+    if (key) pb_store(key, p);
     return p;
 }
 
@@ -185,6 +290,14 @@ __attribute__((weak)) int albw_ss_slot_info(int slot, char *buf, size_t n);
 __attribute__((weak)) const char *albw_ss_note(void);
 #define SS_SLOTS_UI 10
 static int g_ss_slot;
+/* platform/states_ui.c (#included after menu.c): toasts, thumbnails, controller shortcuts */
+static void ssui_save(int slot);
+static void ssui_quick_load(int slot, const char *again);
+static void ssui_slot_step(int d);
+static int ssui_l3_held(void);
+static void ssui_pad_shortcuts(void);
+static void ssui_after_frame_point(void);
+static void ssui_draw(int ww, int wh);
 static char g_title_fps[160];
 static const char *g_title_msg;   /* save-state outcome, shown for a few seconds */
 static int g_title_dirty;   /* " - 59.9 fps" while Debug > Show FPS is on, + a save-state message */
@@ -889,14 +1002,14 @@ static int plat_layout_event(const SDL_Event *e) {
             return 1;
         }
         if (e->key.key == SDLK_F6 || e->key.key == SDLK_F7) {   /* save / load state (current slot) */
-            if (!e->key.repeat && albw_ss_request) albw_ss_request(e->key.key == SDLK_F6 ? 1 : 2, g_ss_slot);
+            if (!e->key.repeat) {
+                if (e->key.key == SDLK_F6) ssui_save(g_ss_slot);
+                else ssui_quick_load(g_ss_slot, "F7");
+            }
             return 1;
         }
         if (e->key.key == SDLK_F8) {   /* next save-state slot (Shift: previous) */
-            if (!e->key.repeat) {
-                g_ss_slot = (g_ss_slot + ((mod & SDL_KMOD_SHIFT) ? SS_SLOTS_UI - 1 : 1)) % SS_SLOTS_UI;
-                fprintf(stderr, "savestate: slot %d\n", g_ss_slot + 1);
-            }
+            if (!e->key.repeat) ssui_slot_step((mod & SDL_KMOD_SHIFT) ? -1 : 1);
             return 1;
         }
         if (e->key.key == SDLK_F12) {   /* screenshot of both screens */
@@ -1410,6 +1523,9 @@ int plat_poll(void) {
         in.touch_x = g_route_tx;
         in.touch_y = g_route_ty;
     }
+    /* L3 held: L, R and the D-pad's left / right are the save-state shortcuts (states_ui.c), not
+     * game input */
+    if (ssui_l3_held()) gp &= ~(uint32_t)(KEY_L | KEY_R | KEY_DLEFT | KEY_DRIGHT);
     in.held = kb | gp | cp | (in.touch ? KEY_TOUCH : 0) | sk;
     /* single-screen remaps only in the field (Link exists): at the title and the file select
      * Start goes to the game (straight to picking a save) and its own cursor works with the D-pad */
@@ -1545,9 +1661,11 @@ static void plat_composite(const Layout *l) {
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
     sel_composite(l);   /* single-screen selector over the bottom screen (selector.c) */
+    if (!g_separate || l->visible[SCREEN_TOP]) ssui_draw(l->ww, l->wh);   /* save-state toast */
 }
 
 #include "menu.c"   /* Esc menu overlay (pauses the game inside plat_end_frame) */
+#include "states_ui.c"   /* save-state toasts, thumbnails, controller shortcuts */
 
 /* debug: ALBW_FRAME_MS (kept out of plat_end_frame: its stack frame must stay as in older builds,
  * save states resume inside it) */
@@ -1574,6 +1692,11 @@ static __attribute__((noinline)) void frame_ms_trace(void) {
 }
 
 void plat_end_frame(void) {
+    /* save states resume inside this function: its ARM frame must keep the size of the builds
+     * that saved them (1016 bytes + d8-d15). Moving the save-state shortcuts out (states_ui.c)
+     * shrank it by 8; this restores it (ss_convert.c refuses a state whose frame differs) */
+    volatile uint8_t ss_frame_pad[8];
+    ss_frame_pad[0] = 0;
     frame_ms_trace();
 
     /* save / load state requests (keys, menu) run here: the main game thread still holds the app
@@ -1605,6 +1728,7 @@ void plat_end_frame(void) {
             if (until > 0 && --until == 0) g_title_dirty = 1;
             g_title_msg = until > 0 ? shown : NULL;
         }
+        ssui_after_frame_point();   /* the outcome as a toast, the saved slot's picture */
     }
     shot_maybe();
     prof_frame();
@@ -1690,24 +1814,7 @@ void plat_end_frame(void) {
         }
     }
     { void albw_gl_count_frame(void); albw_gl_count_frame(); }   /* render/glcount.c (ALBW_GL_COUNT) */
-#if defined(__ANDROID__)
-    {   /* save states on a handheld (no F6 / F7): hold L3 and press L = save, R = load (current slot) */
-        static int prev_l, prev_r;
-        int l3 = 0, l = 0, r = 0, n = 0;
-        SDL_JoystickID *ids = SDL_GetGamepads(&n);
-        for (int i = 0; ids && i < n; i++) {
-            SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
-            if (!g) continue;
-            l3 |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_LEFT_STICK);
-            l |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
-            r |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-        }
-        SDL_free(ids);
-        if (l3 && l && !prev_l && albw_ss_request) { fprintf(stderr, "savestate: save to slot %d (L3+L)\n", g_ss_slot + 1); albw_ss_request(1, g_ss_slot); }
-        if (l3 && r && !prev_r && albw_ss_request) { fprintf(stderr, "savestate: load slot %d (L3+R)\n", g_ss_slot + 1); albw_ss_request(2, g_ss_slot); }
-        prev_l = l; prev_r = r;
-    }
-#endif
+    ssui_pad_shortcuts();   /* L3 + L save, L3 + R load, L3 + D-pad slot (states_ui.c) */
     {   /* Debug > Show FPS: game frames per second in the window title, updated twice a second */
         static uint64_t t0; static int n, shown;
         n++;

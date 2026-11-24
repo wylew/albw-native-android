@@ -310,6 +310,36 @@ changed `albw_ss_frame_point` is refused). One of the first five same-build test
 (null pointer at 0x34, not reproduced since). States of builds before 2026-11-23 evening (other
 data layout) do not load.
 
+### Save-state controls and on-screen messages
+
+`platform/states_ui.c`, the Esc menu's **States** tab (`platform/menu.c`):
+- **Controller** (any platform): hold **L3** (left stick click) and press **L** = save, **R** = load,
+  **D-pad left / right** = previous / next slot. While L3 is held, L, R and D-pad left / right do
+  not reach the game (the 3DS circle pad has no click, so no game input is lost).
+- **Keyboard**: F6 save, F7 load, F8 / Shift+F8 slot.
+- **Messages**: a panel at the top of the screen for ~2.5 s after a save, load, slot change or
+  error, with the slot's save time and picture (the title bar, invisible on Android, still gets
+  the message too).
+- **Pictures**: a successful save stores the top screen at 240x144 next to the state
+  (`slotN.state.thumb`); shown in messages and under the States tab's items.
+- **Confirm load** (States tab, `confirm_load` in layout.cfg, default on): a quick load (L3+R, F7)
+  first shows the slot, its time and picture and asks for the same press again within 3 s; the
+  menu's Load item loads at once.
+- On Android the Esc menu defaults to the centred panel style (an existing layout.cfg keeps its
+  `menu_style`).
+- `plat_end_frame` keeps its 1016-byte ARM frame (padding) so states of earlier builds still load;
+  the converter now compares the whole ARM prologue (it stopped at the first `sub sp` and would
+  have accepted a changed frame).
+
+### Shader cache
+
+`gl_program` (`platform/platform.c`) stores each linked program's binary (`glGetProgramBinary`) in
+`.cache/albw-port/shaders` (Android: in the app's files folder; desktop: `$XDG_CACHE_HOME` or
+`~/.cache`) and loads it next time instead of compiling (Adreno: 20-100 ms per program, the hitch
+when a new area's materials first appear). Keyed by the GL vendor / renderer / version and both
+sources; a binary the driver rejects is deleted and compiled again. `ALBW_SHADER_CACHE=0`: off.
+Status: built, **not yet tested on the device** (2026-11-24).
+
 ### Working on it from another machine
 
 You need: Linux with clang + lld (as `build.sh` installs), Python 3, the Android SDK + NDK, the
@@ -348,3 +378,4 @@ then commit.
 | 2026-11-23 | Stop A16 fixed (converter mapped through duplicate local symbol names; a corrupted listener caused the cutscene stack overflow). The user's slot 1 carries the corrupted pointer: replay from the in-game save |
 | 2026-11-24 | App shown as "ALBW"; launcher icon from `icon.png` in the repository root (game artwork: git-ignored, copied into build/android/res by Gradle; without it the default icon). "Not filling the screen" was the layout's integer scale (On in the user's layout.cfg: 4x instead of 4.5x on 1080p) |
 | 2026-11-24 | Stop A17 fixed (frozen Buzz Blobs: float-returning C++ methods given returns-this thunks; converter regression from A16). Fault reporter `ALBW_FAULT_REPORT` |
+| 2026-11-24 | Save-state UI (States tab, toasts with pictures, L3 + D-pad slots, confirm load) and shader program binary cache: built, device test pending |

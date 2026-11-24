@@ -553,9 +553,14 @@ static uint32_t callsite_map(Conv *c, const Sym *s, const Sym *n, const uint8_t 
     uint32_t w = rd32(oc + off - 4);
     if (!arm_bl(w)) return 0;
     const uint8_t *nc = (const uint8_t *)(uintptr_t)n->addr;
+    /* the whole prologue: up to the LAST sub sp / vpush in the first 16 instructions (the first
+     * sub sp can be the 4-byte alignment slot before vpush {d8-d15} and the real frame: stopping
+     * there accepted plat_end_frame with a 1008- instead of 1016-byte frame) */
     uint32_t pl = 8;
-    for (uint32_t i = 0; i < 16 && 4 * i + 4 <= osz; i++)
-        if ((rd32(oc + 4 * i) & 0x0FFFF000u) == 0x024DD000u) { pl = 4 * i + 4; break; }
+    for (uint32_t i = 0; i < 16 && 4 * i + 4 <= osz; i++) {
+        uint32_t x = rd32(oc + 4 * i);
+        if ((x & 0x0FFFF000u) == 0x024DD000u || (x & 0x0FBF0F00u) == 0x0D2D0B00u) pl = 4 * i + 4;   /* sub sp / vpush */
+    }
     if (pl > osz || pl > n->size || memcmp(oc, nc, pl)) return 0;
     uint32_t otgt = arm_bl_target(v - 4, w);
     int f, k = sym_at(&c->old, otgt, &f);

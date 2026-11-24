@@ -104,6 +104,7 @@ typedef void GLvoid;
     X(void, glGetShaderInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
     X(void, glDeleteShader, (GLuint)) \
     X(GLuint, glCreateProgram, (void)) \
+    X(void, glDeleteProgram, (GLuint)) \
     X(void, glAttachShader, (GLuint, GLuint)) \
     X(void, glLinkProgram, (GLuint)) \
     X(void, glGetProgramiv, (GLuint, GLenum, GLint *)) \

@@ -6,8 +6,9 @@
  * and handles input until the menu closes (the game thread is blocked like during a vblank wait).
  *
  * Menus:
- *  File   Resume, State slot (1..10), Save state (F6), Load state (F7) - native/runtime/savestate.c,
- *         Reload controls (input.cfg), Quit game
+ *  File   Resume, save sets, Controls, Reset game, Quit game
+ *  States Slot (1..10, with its save time and a thumbnail), Save state (F6), Load state (F7),
+ *         Confirm load (quick loads ask twice) - native/runtime/savestate.c, platform/states_ui.c
  *  Video  Windows (separate / joined), Layout preset, Swap screens, Filter, Integer scale,
  *         Resolution (internal render scale 1x..8x), Fullscreen, Edit layout (the F3 mouse editor),
  *         Menu style (this menu as a bar across the top or as a centered panel with the same tabs)
@@ -62,7 +63,7 @@ static void bind_set(int a, const char *name) {
     else
         snprintf(g_menu_note, sizeof g_menu_note, "Cannot save: %s", input_last_error());
 }
-static GLint menu_loc_size;
+static GLint menu_loc_size, menu_loc_image;
 
 typedef struct { float x, y, u, v, r, g, b, a; } MenuVtx;
 #define MENU_MAX_VTX (6 * 2048)
@@ -70,14 +71,18 @@ static MenuVtx menu_vtx[MENU_MAX_VTX];
 static int menu_nv;
 
 enum { MI_RESUME, MI_WINDOWS, MI_SINGLE, MI_PRESET, MI_SWAP, MI_FILTER, MI_INTEGER, MI_RES, MI_FULLSCREEN, MI_EDIT,
-       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_COUNT };
+       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_COUNT };
 
 typedef struct { const char *title; const int *items; int n; const char *const *notes; } MenuDef;
 #define MI_BIND_BASE 200   /* MI_BIND_BASE + InAction: one Controls row per action */
 static int menu_controls_items[2 + IN_ACTION_COUNT] = {MI_BIND_DEV, MI_BIND_RESET};   /* rest: menu_gl_init */
 static const char *const menu_controls_notes[] = {"Enter: press the new key / button   - or Delete: clear",
                                                   "Several keys: edit input.cfg (\"A, B\" or \"Ctrl&X\")", NULL};
-static const int menu_file_items[] = {MI_RESUME, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_SET_SEL, MI_SET_LOAD, MI_CONTROLS, MI_RESET, MI_QUIT};
+static const int menu_file_items[] = {MI_RESUME, MI_SET_SEL, MI_SET_LOAD, MI_CONTROLS, MI_RESET, MI_QUIT};
+static const int menu_states_items[] = {MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_SS_CONFIRM};
+static const char *const menu_states_notes[] = {"Controller: hold L3 (left stick) and press",
+                                                "  L save   R load   D-pad left/right slot",
+                                                "Keyboard: F6 save   F7 load   F8 slot", NULL};
 static const int menu_video_items[] = {MI_WINDOWS, MI_SINGLE, MI_WIDE, MI_PRESET, MI_SWAP, MI_FILTER, MI_INTEGER, MI_RES, MI_FULLSCREEN, MI_EDIT, MI_STYLE};
 static const int menu_help_items[] = {MI_LOG_COPY, MI_LOG_FOLDER, MI_REPORT, MI_LOG_PATH};
 static const char *const menu_help_notes[] = {"Copy log, then paste it into the GitHub issue (Ctrl+V)",
@@ -90,6 +95,7 @@ static const char *const menu_debug_notes[] = {"Game debug menus: none in the re
 #define MENU_N(a) ((int)(sizeof(a) / sizeof(a)[0]))
 static const MenuDef menu_defs[] = {
     {"File", menu_file_items, MENU_N(menu_file_items), NULL},
+    {"States", menu_states_items, MENU_N(menu_states_items), menu_states_notes},
     {"Video", menu_video_items, MENU_N(menu_video_items), NULL},
     {"Controls", menu_controls_items, MENU_N(menu_controls_items), menu_controls_notes},
     {"Help", menu_help_items, MENU_N(menu_help_items), menu_help_notes},
@@ -97,6 +103,10 @@ static const MenuDef menu_defs[] = {
     {"Debug", menu_debug_items, MENU_N(menu_debug_items), menu_debug_notes},
 };
 #define MENU_COUNT MENU_N(menu_defs)
+#define MENU_STATES 1
+/* platform/states_ui.c (#included after this file) */
+static GLuint ssui_thumb(int slot);
+static void ssui_save_requested(int slot);
 static const int menu_speeds[] = {25, 50, 100, 200, 0};   /* Debug > Speed, percent (0 = unlimited) */
 
 static const char *MENU_VS =
@@ -107,14 +117,15 @@ static const char *MENU_VS =
     "  v_uv = uv; v_col = col; }\n";
 static const char *MENU_FS =
     "#version 330 core\n"
-    "in vec2 v_uv; in vec4 v_col; uniform sampler2D tex; out vec4 o;\n"
-    "void main() { o = vec4(v_col.rgb, v_col.a * texture(tex, v_uv).r); }\n";
+    "in vec2 v_uv; in vec4 v_col; uniform sampler2D tex; uniform int image; out vec4 o;\n"
+    "void main() { o = image != 0 ? texture(tex, v_uv) * v_col : vec4(v_col.rgb, v_col.a * texture(tex, v_uv).r); }\n";
 
 static void menu_gl_init(void) {
     for (int a = 0; a < IN_ACTION_COUNT; a++) menu_controls_items[2 + a] = MI_BIND_BASE + a;
     if (menu_prog) return;
     menu_prog = gl_program(MENU_VS, MENU_FS);
     menu_loc_size = glGetUniformLocation(menu_prog, "size");
+    menu_loc_image = glGetUniformLocation(menu_prog, "image");
     glUseProgram(menu_prog);
     glUniform1i(glGetUniformLocation(menu_prog, "tex"), 0);
     glGenVertexArrays(1, &menu_vao);
@@ -159,6 +170,39 @@ static void menu_quad(float x, float y, float w, float h, int c, float r, float 
 
 static void menu_rect(float x, float y, float w, float h, float r, float g, float b, float a) {
     menu_quad(x, y, w, h, 127, r, g, b, a);
+}
+
+/* a whole-texture quad (an RGBA image: thumbnails); flush with menu_flush(.., tex, 1) */
+static void menu_image(float x, float y, float w, float h, float a) {
+    if (menu_nv + 6 > MENU_MAX_VTX) return;
+    MenuVtx q[4] = {{x, y, 0, 0, 1, 1, 1, a}, {x + w, y, 1, 0, 1, 1, 1, a}, {x, y + h, 0, 1, 1, 1, 1, a},
+                    {x + w, y + h, 1, 1, 1, 1, 1, a}};
+    static const int idx[6] = {0, 1, 2, 2, 1, 3};
+    for (int k = 0; k < 6; k++) menu_vtx[menu_nv++] = q[idx[k]];
+}
+
+/* draw and empty the batch: text / rectangles (image 0, the font atlas) or images (image 1) */
+static void menu_flush(int ww, int wh, GLuint tex, int image) {
+    if (menu_nv) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, ww, wh);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glUseProgram(menu_prog);
+        glUniform4fv(menu_loc_size, 1, (float[4]){(float)ww, (float)wh, 0, 0});
+        glUniform1i(menu_loc_image, image);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glBindVertexArray(menu_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, menu_vbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(menu_nv * sizeof(MenuVtx)), menu_vtx);
+        glDrawArrays(GL_TRIANGLES, 0, menu_nv);
+        glBindVertexArray(0);
+        glDisable(GL_BLEND);
+    }
+    menu_nv = 0;
 }
 
 static void menu_text(float x, float y, float s, const char *t, float r, float g, float b, float a) {
@@ -210,11 +254,12 @@ static void menu_label(int i, char *buf, size_t n) {
     case MI_SS_SLOT: {
         char info[64] = "unavailable";
         if (albw_ss_slot_info) albw_ss_slot_info(g_ss_slot, info, sizeof info);
-        snprintf(buf, n, "State slot     < %d: %s >", g_ss_slot + 1, info);
+        snprintf(buf, n, "Slot   < %d >   %s", g_ss_slot + 1, info);
         break;
     }
-    case MI_SS_SAVE: snprintf(buf, n, "Save state  (F6)"); break;
-    case MI_SS_LOAD: snprintf(buf, n, "Load state  (F7)"); break;
+    case MI_SS_SAVE: snprintf(buf, n, "Save state to slot %d", g_ss_slot + 1); break;
+    case MI_SS_CONFIRM: snprintf(buf, n, "Confirm load   < %s >", g_layout_cfg.confirm_load ? "On (press twice)" : "Off"); break;
+    case MI_SS_LOAD: snprintf(buf, n, "Load state from slot %d", g_ss_slot + 1); break;
     case MI_SET_SEL:
         set_scan_once();
         if (set_n) snprintf(buf, n, "Save set       < %s >", set_names[set_sel]);
@@ -265,6 +310,7 @@ static void menu_size(int m, float row, size_t *chars, float *h, int *nnotes) {
     *chars = longest + 3;
     int rows = d->n < g_menu_max_rows ? d->n : g_menu_max_rows;
     *h = rows * row + row * 0.5f + (nn ? (nn + 0.5f) * row * 0.8f : 0);
+    if (m == MENU_STATES) *h += row * 6.6f;   /* the slot's picture, 6 rows high */
     *nnotes = nn;
 }
 
@@ -571,9 +617,11 @@ static void menu_activate(int i, int dir) {
     case MI_RESET: plat_reset_press(); break;
     case MI_STYLE: g_layout_cfg.menu_centered ^= 1; plat_layout_changed(); break;
     case MI_SS_SLOT: g_ss_slot = (g_ss_slot + (dir < 0 ? SS_SLOTS_UI - 1 : 1)) % SS_SLOTS_UI; break;
+    case MI_SS_CONFIRM: g_layout_cfg.confirm_load ^= 1; plat_layout_changed(); break;
     case MI_SS_SAVE:
     case MI_SS_LOAD:   /* runs at the next frame end (the game continues from here) */
         if (!albw_ss_request) { snprintf(g_menu_note, sizeof g_menu_note, "Save states are not available here"); break; }
+        if (i == MI_SS_SAVE) ssui_save_requested(g_ss_slot);
         albw_ss_request(i == MI_SS_SAVE ? 1 : 2, g_ss_slot);
         g_menu_open = 0;
         break;
@@ -748,22 +796,28 @@ static void menu_draw(int ww, int wh) {
         menu_text(g.dx + cw, y, hs, d->notes[k], 0.55f, 0.55f, 0.55f, 1);
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, ww, wh);
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glUseProgram(menu_prog);
-    glUniform4fv(menu_loc_size, 1, (float[4]){(float)ww, (float)wh, 0, 0});
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, menu_tex);
-    glBindVertexArray(menu_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, menu_vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(menu_nv * sizeof(MenuVtx)), menu_vtx);
-    glDrawArrays(GL_TRIANGLES, 0, menu_nv);
-    glBindVertexArray(0);
-    glDisable(GL_BLEND);
+    /* States: the selected slot's picture (taken when it was saved) under the items */
+    float px = 0, py = 0, pw = 0, ph = 0;
+    GLuint thumb = 0;
+    if (g_menu_cur == MENU_STATES) {
+        ph = g.row * 6;
+        pw = ph * 5 / 3;   /* the top screen's 400x240 */
+        if (pw > g.dw - 2 * cw) { pw = g.dw - 2 * cw; ph = pw * 0.6f; }
+        px = g.dx + (g.dw - pw) * 0.5f;
+        py = g.dy + g.row * 0.25f + rows * g.row + g.row * 0.3f + g.nnotes * g.row * 0.8f + g.row * 0.2f;
+        thumb = ssui_thumb(g_ss_slot);
+        menu_rect(px - 2 * s, py - 2 * s, pw + 4 * s, ph + 4 * s, 0.85f, 0.70f, 0.25f, 0.8f);
+        menu_rect(px, py, pw, ph, 0.02f, 0.02f, 0.03f, 1);
+        if (!thumb) {
+            const char *t = "no picture";
+            menu_text(px + (pw - strlen(t) * cw * 0.75f) * 0.5f, py + ph * 0.5f - th * 0.4f, s * 0.75f, t, 0.5f, 0.5f, 0.5f, 1);
+        }
+    }
+    menu_flush(ww, wh, menu_tex, 0);
+    if (thumb) {
+        menu_image(px, py, pw, ph, 1);
+        menu_flush(ww, wh, thumb, 1);
+    }
 }
 
 /* modal loop: the last game frame + the menu until it closes (game paused) */
