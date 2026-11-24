@@ -18,7 +18,8 @@
  *         Report a problem (GitHub), log path
  *  About  Version (from VERSION) and build date / time
  *  Cheats Value cheats on Link's status block (platform/cheats.c): max rupees, monster materials,
- *         Maiamais, full hearts, 5 small keys, infinite power meter; Reset rupees. Session only.
+ *         Maiamais, full hearts, 5 small keys, infinite power meter; code cheats: invincible, money
+ *         doesn't decrease, items / painting cost no energy; Reset rupees. Session only.
  *  Debug  Logging (starts a log file when run from a terminal), Particles, Fog, Show FPS (window title), Speed (25 % .. unlimited),
  *         HUD overlay (rupees and Y / B on the main screen in single-screen mode: platform/hud_overlay.c). The retail code has
  *         no hidden debug menu to expose (searched: the only developer leftovers are the course
@@ -94,7 +95,8 @@ static const char *const menu_help_notes[] = {"Copy log, then paste it into the 
 static const int menu_about_items[] = {MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE};
 static const char *const menu_about_notes[] = {"Unofficial native port of A Link Between Worlds", "Needs your own ROM; none is included", NULL};
 static const int menu_cheat_items[] = {MI_CHEAT_BASE + 0, MI_CHEAT_BASE + 1, MI_CHEAT_BASE + 2, MI_CHEAT_BASE + 3,
-                                       MI_CHEAT_BASE + 4, MI_CHEAT_BASE + 5, MI_CHEAT_RESET};
+                                       MI_CHEAT_BASE + 4, MI_CHEAT_BASE + 5, MI_CHEAT_BASE + 6, MI_CHEAT_BASE + 7,
+                                       MI_CHEAT_BASE + 8, MI_CHEAT_BASE + 9, MI_CHEAT_RESET};
 static const char *const menu_cheat_notes[] = {"Applied every frame while on; all off at the next start",
                                                "Values end up in save states and in-game saves", NULL};
 static const int menu_debug_items[] = {MI_DBG_LOG, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_DBG_HUD};

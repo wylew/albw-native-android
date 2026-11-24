@@ -59,7 +59,9 @@ for f in native/platform/platform.c native/runtime/*.c native/audio/mixer.c nati
     [[ -f "$o" && "$o" -nt "$f" && "$o" -nt native/runtime/android_compat.h && "$o" -nt native/albw_native.h \
        && "$o" -nt native/runtime/runtime.h ]] || stale=1
     if [[ "$f" == native/platform/platform.c && $stale == 0 ]]; then
-        for inc in native/platform/{layout,input,menu,selector}.c native/platform/{menu_font,layout,gl,selector_img}.h native/render/render.h; do [[ "$inc" -nt "$o" ]] && stale=1; done
+        # every file platform.c #includes: all of native/platform (states_ui.c, hud_overlay.c and
+        # cheats.c were missing from a fixed list: an edit to one alone left platform.o stale)
+        for inc in native/platform/*.c native/platform/*.h native/render/render.h; do [[ "$inc" -nt "$o" ]] && stale=1; done
     fi
     if [[ $stale == 1 ]]; then
         if ! clang "${CFLAGS[@]}" -Inative/include "${EXTRA[@]}" "${SDL_CFLAGS[@]}" -c "$f" -o "$o" 2> $A/cc.err; then

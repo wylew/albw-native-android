@@ -13,11 +13,18 @@
  *   +0x4110 f32 power meter (600.0 full without the upgrade; the AR code wrote its upper half)
  * Link: the player position pointer *(*data_0070FB60 + 0x1C) (00520FC0, as the route autopilot)
  * is the actor's +0x3D0; the actor is accepted only if its profile name (+0x2D0 -> +0x10) is
- * "PlayerObject". Applied once per presented frame (as the AR engine), on the game thread,
+ * "PlayerObject". ALBW_CHEATS=<key,...> (debug: rupees materials maiamai hearts keys power
+ * invincible money items painting) turns cheats on at the start. Applied once per presented frame (as the AR engine), on the game thread,
  * between frames. Session only: every start has all cheats off (layout.cfg keeps none).
- * Not ported: the code patches (Invincible, Money doesn't decrease, no energy cost), which
- * rewrite ARM instructions; they need hooks in the recompiled functions (README: Cheats). */
-enum { CH_RUPEES, CH_MATERIALS, CH_MAIAMAI, CH_HEARTS, CH_KEYS, CH_POWER, CH_COUNT };
+ * Code cheats (the AR codes rewrite ARM instructions; here the recompiled functions check
+ * albw_cheat_code, set from the toggles every frame):
+ *   1 Invincible        native/game/func_00149BD4.c (hearts adder: always the maximum)
+ *   2 Money ...         native/compilefix/func_00255AC4.c / func_00255AB4.c (subtract branch skipped)
+ *   4 Items: no energy  native/game/func_002D3B08.c .. func_002D3C54.c (ten item costs)
+ *   8 Painting: no energy  native/compilefix/func_002D3CD4.c (the wall-merge drain) */
+enum { CH_RUPEES, CH_MATERIALS, CH_MAIAMAI, CH_HEARTS, CH_KEYS, CH_POWER,
+       CH_INVINCIBLE, CH_MONEY, CH_ITEM_ENERGY, CH_PAINT_ENERGY, CH_COUNT };
+uint32_t albw_cheat_code;   /* code cheats: bits read by the hooked game functions (above) */
 static int g_cheat[CH_COUNT];
 static int g_cheat_reset_rupees;     /* one-shot */
 static float g_cheat_power_max = 600.0f;
@@ -35,9 +42,20 @@ static uint8_t *cheat_status_block(void) {
     return link + 0x40C;
 }
 
+static const char *const g_cheat_keys[CH_COUNT] = {"rupees", "materials", "maiamai", "hearts", "keys", "power",
+                                                  "invincible", "money", "items", "painting"};
 static __attribute__((noinline)) void cheats_apply(void) {
+    static int env_done;
+    if (!env_done) {   /* ALBW_CHEATS=<key>[,<key>...] (debug, tests): cheats on from the start */
+        env_done = 1;
+        const char *e = getenv("ALBW_CHEATS");
+        for (int i = 0; e && i < CH_COUNT; i++)
+            if (strstr(e, g_cheat_keys[i])) { g_cheat[i] = 1; fprintf(stderr, "cheats: %s on (ALBW_CHEATS)\n", g_cheat_keys[i]); }
+    }
+    albw_cheat_code = (g_cheat[CH_INVINCIBLE] ? 1u : 0) | (g_cheat[CH_MONEY] ? 2u : 0) |
+                      (g_cheat[CH_ITEM_ENERGY] ? 4u : 0) | (g_cheat[CH_PAINT_ENERGY] ? 8u : 0);
     int any = g_cheat_reset_rupees;
-    for (int i = 0; i < CH_COUNT; i++) any |= g_cheat[i];
+    for (int i = 0; i < CH_INVINCIBLE; i++) any |= g_cheat[i];
     if (!any) return;
     uint8_t *s = cheat_status_block();
     if (!s) return;
@@ -56,4 +74,5 @@ static __attribute__((noinline)) void cheats_apply(void) {
 
 static const char *const g_cheat_names[CH_COUNT] = {
     "Max rupees (9999)", "Max monster tails / guts / horns", "Max Maiamais (100)",
-    "Full hearts", "5 small keys", "Infinite power meter"};
+    "Full hearts", "5 small keys", "Infinite power meter",
+    "Invincible", "Money doesn't decrease", "Items cost no energy", "Painting costs no energy"};

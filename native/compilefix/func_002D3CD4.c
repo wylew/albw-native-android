@@ -2,6 +2,10 @@
  * restored by hand (Ghidra dropped the approach-from-above branch; BOOT_LOG 150). */
 #include "ghidra_types.h"
 
+#define CHEAT_PAINT_ENERGY 8u
+/* cheat switches (platform/cheats.c, Esc menu > Cheats); weak: builds without the platform layer */
+extern uint32_t albw_cheat_code __attribute__((weak));
+#define ALBW_CHEAT(bit) (&albw_cheat_code && (albw_cheat_code & (bit)))
 extern int func_00587B50(int param_1,int *param_2,int param_3);
 extern int func_00587F74(int param_1,int *param_2,int param_3);
 extern int *DAT_002d3fa4;
@@ -91,7 +95,9 @@ undefined1 func_002D3CD4(int param_1,int param_2,int param_3,int param_4)
         uVar3 = 0;
         if (*(char *)(param_2 + 1) == '\0') {
           if (*(float *)(param_1 + 0x14) < *(float *)(param_1 + 0x10)) {
-            *(float *)(param_1 + 0x10) = *(float *)(param_1 + 0x10) - *(float *)(param_1 + 0x14);
+            /* cheat "Painting costs no energy" (Action Replay EUR: nop at EU 002D3ECC, this vsub) */
+            if (!ALBW_CHEAT(CHEAT_PAINT_ENERGY))
+              *(float *)(param_1 + 0x10) = *(float *)(param_1 + 0x10) - *(float *)(param_1 + 0x14);
           }
           else if (param_3 != 0) {
             *(float *)(param_1 + 0x10) = DAT_002d3fac;

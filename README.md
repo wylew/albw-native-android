@@ -355,9 +355,20 @@ port lays out differently; the fields are Link's status block at player actor +0
 adder `00255AC4(link + 0x40C, n)`): +0x24 keys, +0xF0 rupees (u16), +0xF9..+0xFB materials, +0xFC
 Maiamais, +0x18C / +0x18D hearts / maximum (quarters), +0x4110 power meter (f32). Applied once per
 frame. Checked on the RP5 (slot 2): every value set, the game's HUD shows them.
-Not yet ported: the code patches (Invincible, Money doesn't decrease, items / painting cost no
-energy): they need hooks in the recompiled functions at those EU addresses. The Cucco ranch cheat
-is left out on purpose.
+Code cheats (the AR codes rewrite ARM instructions; here the recompiled functions check
+`albw_cheat_code`, set from the toggles): **Invincible** (`native/game/func_00149BD4.c`, the
+hearts adder sets the maximum on every change, as AR 00149BEC/F0), **Money doesn't decrease**
+(`native/compilefix/func_00255AC4.c` + `func_00255AB4.c`, the subtract branch skipped, as AR
+E0255B14), **Items cost no energy** (`native/game/func_002D3B08.c` .. `func_002D3C54.c`, the ten
+item costs 300 / 150 / 75, as the AR nops at EU 002D3AF4..002D3C40) and **Painting costs no energy**
+(`native/compilefix/func_002D3CD4.c`, the wall-merge drain, as AR 002D3ECC). The hooked heart adder
+and item-cost functions are on the returns-this list and return their pointer. Checked on the
+RP5: Invincible (three spawned Buzz Blobs: hearts stay 12 / 12; without it 6 -> 0). Money, item
+and painting energy are built and inspected, not yet seen in play (no shop, energy item or wall
+merge in the test saves). `ALBW_CHEATS=<key,...>` (debug) turns cheats on at start. The Cucco
+ranch cheat is left out on purpose.
+Build fix found on the way: `tools/link_android.sh` / `tools/link.sh` rebuilt platform.o only for
+a fixed list of included files; any file in `native/platform/` counts now.
 
 ### Shader cache
 
@@ -414,3 +425,4 @@ then commit.
 | 2026-11-24 | D-pad camera look-around checked (camera trace `ALBW_H3D_CAMTRACE`, autopilot holds): left / right pan and spring back (right was only blocked by the area edge at the test spot); up / down do nothing. Unknown whether the original pans vertically; left as is (user's call). Controller mapping verified (defaults, D-pad reaches the game as the 3DS D-pad) |
 | 2026-11-24 | HUD overlay: rupees (top right) and B / Y items (bottom right) from the bottom screen on the main screen in single-screen mode; Debug menu toggle |
 | 2026-11-24 | Cheats tab: value cheats (rupees, materials, Maiamais, hearts, keys, power meter, reset rupees) on Link's status block, checked on the RP5 |
+| 2026-11-24 | Code cheats: Invincible (checked: hearts stay full under Buzz Blob shocks), Money doesn't decrease, items / painting cost no energy (hooks in the recompiled functions); platform.o staleness fix in the link scripts |

@@ -65,7 +65,8 @@ for f in native/platform/platform.c native/runtime/*.c native/audio/mixer.c nati
     [[ -f "$o" && "$o" -nt "$f" ]] || stale=1
     # platform.c #includes layout.c, input.c, menu.c (+ menu_font.h): rebuild when any changed
     if [[ "$f" == native/platform/platform.c && $stale == 0 ]]; then
-        for inc in native/platform/{layout,input,menu,selector}.c native/platform/{menu_font,layout,gl,selector_img}.h native/render/render.h; do [[ "$inc" -nt "$o" ]] && stale=1; done
+        # every file platform.c #includes: all of native/platform (a fixed list missed new files)
+        for inc in native/platform/*.c native/platform/*.h native/render/render.h; do [[ "$inc" -nt "$o" ]] && stale=1; done
     fi
     [[ $stale == 0 ]] || clang "${CFLAGS[@]}" -Inative/include "${EXTRA[@]}" \
         $(PKG_CONFIG_LIBDIR=$PCP pkg-config --cflags sdl3) -c "$f" -o "$o"
