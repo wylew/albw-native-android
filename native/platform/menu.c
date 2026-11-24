@@ -17,6 +17,8 @@
  *  Help   Copy log to clipboard (header + end of the log file, for GitHub issues), Open log folder,
  *         Report a problem (GitHub), log path
  *  About  Version (from VERSION) and build date / time
+ *  Cheats Value cheats on Link's status block (platform/cheats.c): max rupees, monster materials,
+ *         Maiamais, full hearts, 5 small keys, infinite power meter; Reset rupees. Session only.
  *  Debug  Logging (starts a log file when run from a terminal), Particles, Fog, Show FPS (window title), Speed (25 % .. unlimited),
  *         HUD overlay (rupees and Y / B on the main screen in single-screen mode: platform/hud_overlay.c). The retail code has
  *         no hidden debug menu to expose (searched: the only developer leftovers are the course
@@ -72,10 +74,11 @@ static MenuVtx menu_vtx[MENU_MAX_VTX];
 static int menu_nv;
 
 enum { MI_RESUME, MI_WINDOWS, MI_SINGLE, MI_PRESET, MI_SWAP, MI_FILTER, MI_INTEGER, MI_RES, MI_FULLSCREEN, MI_EDIT,
-       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_DBG_HUD, MI_COUNT };
+       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_DBG_HUD, MI_CHEAT_RESET, MI_COUNT };
 
 typedef struct { const char *title; const int *items; int n; const char *const *notes; } MenuDef;
 #define MI_BIND_BASE 200   /* MI_BIND_BASE + InAction: one Controls row per action */
+#define MI_CHEAT_BASE 300  /* MI_CHEAT_BASE + cheat (cheats.c): one Cheats row per toggle */
 static int menu_controls_items[2 + IN_ACTION_COUNT] = {MI_BIND_DEV, MI_BIND_RESET};   /* rest: menu_gl_init */
 static const char *const menu_controls_notes[] = {"Enter: press the new key / button   - or Delete: clear",
                                                   "Several keys: edit input.cfg (\"A, B\" or \"Ctrl&X\")", NULL};
@@ -90,6 +93,10 @@ static const char *const menu_help_notes[] = {"Copy log, then paste it into the 
                                               "The log holds no ROM data or personal files", NULL};
 static const int menu_about_items[] = {MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE};
 static const char *const menu_about_notes[] = {"Unofficial native port of A Link Between Worlds", "Needs your own ROM; none is included", NULL};
+static const int menu_cheat_items[] = {MI_CHEAT_BASE + 0, MI_CHEAT_BASE + 1, MI_CHEAT_BASE + 2, MI_CHEAT_BASE + 3,
+                                       MI_CHEAT_BASE + 4, MI_CHEAT_BASE + 5, MI_CHEAT_RESET};
+static const char *const menu_cheat_notes[] = {"Applied every frame while on; all off at the next start",
+                                               "Values end up in save states and in-game saves", NULL};
 static const int menu_debug_items[] = {MI_DBG_LOG, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_DBG_HUD};
 static const char *const menu_debug_notes[] = {"Game debug menus: none in the retail code", "(dev courses E3Field / Test*: not on the ROM)",
                                                NULL};
@@ -102,6 +109,7 @@ static const MenuDef menu_defs[] = {
     {"Help", menu_help_items, MENU_N(menu_help_items), menu_help_notes},
     {"About", menu_about_items, MENU_N(menu_about_items), menu_about_notes},
     {"Debug", menu_debug_items, MENU_N(menu_debug_items), menu_debug_notes},
+    {"Cheats", menu_cheat_items, MENU_N(menu_cheat_items), menu_cheat_notes},
 };
 #define MENU_COUNT MENU_N(menu_defs)
 #define MENU_STATES 1
@@ -230,8 +238,13 @@ static void menu_label(int i, char *buf, size_t n) {
         snprintf(buf, n, "%-16s %s", bind_action_label(a), b[0] ? b : "-");
         return;
     }
+    if (i >= MI_CHEAT_BASE && i < MI_CHEAT_BASE + CH_COUNT) {
+        snprintf(buf, n, "%-34s < %s >", g_cheat_names[i - MI_CHEAT_BASE], g_cheat[i - MI_CHEAT_BASE] ? "On" : "Off");
+        return;
+    }
     switch (i) {
     case MI_RESUME: snprintf(buf, n, "Resume"); break;
+    case MI_CHEAT_RESET: snprintf(buf, n, "Reset rupees to 0"); break;
     case MI_BIND_DEV: snprintf(buf, n, "Device         < %s >", g_bind_pad ? "Controller" : "Keyboard"); break;
     case MI_BIND_RESET: snprintf(buf, n, "Reset %s controls to defaults", g_bind_pad ? "controller" : "keyboard"); break;
     case MI_WINDOWS: snprintf(buf, n, "Windows        < %s >", g_separate ? "Separate" : "Joined"); break;
@@ -545,7 +558,14 @@ static void menu_activate(int i, int dir) {
         else { g_bind_wait = i - MI_BIND_BASE; input_capture_reset(); }
         return;
     }
+    if (i >= MI_CHEAT_BASE && i < MI_CHEAT_BASE + CH_COUNT) {
+        int c = i - MI_CHEAT_BASE;
+        g_cheat[c] ^= 1;
+        snprintf(g_menu_note, sizeof g_menu_note, "%s: %s", g_cheat_names[c], g_cheat[c] ? "on" : "off");
+        return;
+    }
     switch (i) {
+    case MI_CHEAT_RESET: g_cheat_reset_rupees = 1; snprintf(g_menu_note, sizeof g_menu_note, "Rupees reset to 0"); break;
     case MI_BIND_DEV: g_bind_pad ^= 1; break;
     case MI_BIND_RESET: {
         InputConfig c, d;

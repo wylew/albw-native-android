@@ -344,6 +344,21 @@ page is checked every 10 frames from a few pixels (as `selector.c`); the regions
 cache texture only on the map page, so other pages (Items, Gear, dungeon map, warp menu) keep
 the last good copy. Checked on the RP5 (slot 2, Hyrule Castle town).
 
+### Cheats
+
+`platform/cheats.c`, Esc menu > **Cheats** (session only: every start has them off). Value cheats
+after the EUR Action Replay list (JourneyOver/CTRPF-AR-CHEAT-CODES, 00040000000EC400): max rupees,
+max monster tails / guts / horns, max Maiamais, full hearts (refills to the current maximum; the AR
+code also forced 20 hearts), 5 small keys, infinite power meter (holds the highest value seen, at
+least 600.0), and a one-shot Reset rupees. The AR codes write absolute 3DS addresses, which the
+port lays out differently; the fields are Link's status block at player actor +0x40C (the rupee
+adder `00255AC4(link + 0x40C, n)`): +0x24 keys, +0xF0 rupees (u16), +0xF9..+0xFB materials, +0xFC
+Maiamais, +0x18C / +0x18D hearts / maximum (quarters), +0x4110 power meter (f32). Applied once per
+frame. Checked on the RP5 (slot 2): every value set, the game's HUD shows them.
+Not yet ported: the code patches (Invincible, Money doesn't decrease, items / painting cost no
+energy): they need hooks in the recompiled functions at those EU addresses. The Cucco ranch cheat
+is left out on purpose.
+
 ### Shader cache
 
 `gl_program` (`platform/platform.c`) stores each linked program's binary (`glGetProgramBinary`) in
@@ -398,3 +413,4 @@ then commit.
 | 2026-11-24 | Stop A18 fixed (D-pad right crash: dropped call arguments in `003517A4`) |
 | 2026-11-24 | D-pad camera look-around checked (camera trace `ALBW_H3D_CAMTRACE`, autopilot holds): left / right pan and spring back (right was only blocked by the area edge at the test spot); up / down do nothing. Unknown whether the original pans vertically; left as is (user's call). Controller mapping verified (defaults, D-pad reaches the game as the 3DS D-pad) |
 | 2026-11-24 | HUD overlay: rupees (top right) and B / Y items (bottom right) from the bottom screen on the main screen in single-screen mode; Debug menu toggle |
+| 2026-11-24 | Cheats tab: value cheats (rupees, materials, Maiamais, hearts, keys, power meter, reset rupees) on Link's status block, checked on the RP5 |

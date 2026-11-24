@@ -1457,6 +1457,7 @@ static uint32_t route_step(int *pad_x, int *pad_y) {
 
 #include "selector.c"   /* single-screen bottom-screen selector (D-pad + A) */
 #include "hud_overlay.c"   /* rupees + Y / B buttons on the main screen (single screen) */
+#include "cheats.c"   /* Esc menu > Cheats: value cheats on Link's status block */
 
 int plat_poll(void) {
     if (g_quit_req) return 0;   /* "Quit game" in the Esc menu */
@@ -1835,6 +1836,7 @@ void plat_end_frame(void) {
     }
     { void albw_gl_count_frame(void); albw_gl_count_frame(); }   /* render/glcount.c (ALBW_GL_COUNT) */
     ssui_pad_shortcuts();   /* L3 + L save, L3 + R load, L3 + D-pad slot (states_ui.c) */
+    cheats_apply();   /* Esc menu > Cheats (cheats.c) */
     {   /* Debug > Show FPS: game frames per second in the window title, updated twice a second */
         static uint64_t t0; static int n, shown;
         n++;
