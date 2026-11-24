@@ -218,7 +218,25 @@ static void pb_store(uint64_t key, GLuint p) {
     free(bin);
 }
 
+static GLuint gl_program_build(const char *vs, const char *fs);
+/* ALBW_SHADER_LOG=1: the time of every program build (cache load or compile) */
 GLuint gl_program(const char *vs, const char *fs) {
+    static int lg = -1;
+    static double tot_ms;
+    static unsigned n;
+    if (lg < 0) lg = getenv("ALBW_SHADER_LOG") != NULL;
+    uint64_t t0 = lg ? plat_ticks_ns() : 0;
+    unsigned h0 = pb_hits;
+    GLuint p = gl_program_build(vs, fs);
+    if (lg) {
+        double ms = (double)(plat_ticks_ns() - t0) / 1e6;
+        tot_ms += ms;
+        n++;
+        fprintf(stderr, "shader: program %u %s in %.1f ms (total %.0f ms)\n", n, pb_hits != h0 ? "loaded" : "compiled", ms, tot_ms);
+    }
+    return p;
+}
+static GLuint gl_program_build(const char *vs, const char *fs) {
     uint64_t key = 0;
     if (pb_init()) {
         key = pb_fnv(pb_fnv(pb_driver, vs), fs);

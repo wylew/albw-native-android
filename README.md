@@ -337,8 +337,11 @@ data layout) do not load.
 `.cache/albw-port/shaders` (Android: in the app's files folder; desktop: `$XDG_CACHE_HOME` or
 `~/.cache`) and loads it next time instead of compiling (Adreno: 20-100 ms per program, the hitch
 when a new area's materials first appear). Keyed by the GL vendor / renderer / version and both
-sources; a binary the driver rejects is deleted and compiled again. `ALBW_SHADER_CACHE=0`: off.
-Status: built, **not yet tested on the device** (2026-11-24).
+sources; a binary the driver rejects is deleted and compiled again. `ALBW_SHADER_CACHE=0`: off;
+`ALBW_SHADER_LOG=1` logs every program build with its time.
+Measured on the RP5 (start + loading a state in Hyrule Castle town, 98 programs): no cache 8.4 s of
+compiling (slowest program 198 ms, ~12 frames); with the cache 0.3 s (slowest 7.7 ms). Android kept
+no system shader cache for the app (its cache folder stayed empty), so this is the only one.
 
 ### Working on it from another machine
 
@@ -378,4 +381,4 @@ then commit.
 | 2026-11-23 | Stop A16 fixed (converter mapped through duplicate local symbol names; a corrupted listener caused the cutscene stack overflow). The user's slot 1 carries the corrupted pointer: replay from the in-game save |
 | 2026-11-24 | App shown as "ALBW"; launcher icon from `icon.png` in the repository root (game artwork: git-ignored, copied into build/android/res by Gradle; without it the default icon). "Not filling the screen" was the layout's integer scale (On in the user's layout.cfg: 4x instead of 4.5x on 1080p) |
 | 2026-11-24 | Stop A17 fixed (frozen Buzz Blobs: float-returning C++ methods given returns-this thunks; converter regression from A16). Fault reporter `ALBW_FAULT_REPORT` |
-| 2026-11-24 | Save-state UI (States tab, toasts with pictures, L3 + D-pad slots, confirm load) and shader program binary cache: built, device test pending |
+| 2026-11-24 | Save-state UI (States tab, toasts with pictures, L3 + D-pad slots, confirm load) and shader program binary cache, both checked on the RP5: messages and pictures shown, an older build's state still loads, shader build time 8.4 s -> 0.3 s |
