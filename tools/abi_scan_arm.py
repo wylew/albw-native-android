@@ -73,7 +73,10 @@ def native_jobs():
     return jobs
 
 
-RE_DEFINE = re.compile(r"^define\s+(?:[\w\(\)]+\s+)*?(?P<ret>[^@]+?)\s+@(?P<name>[\w.$\"]+)\((?P<args>.*?)\)\s*(?:#\d+\s*)?(?:local_unnamed_addr\s*)?(?:#\d+\s*)?\{",)
+# anything between the argument list and "{": attribute groups, local_unnamed_addr, comdat and the
+# `align 2` of C++ member functions (missed before: Object521298::distance, a float-returning
+# returns-this function, kept its returns-this thunk on ARM - Buzz Blobs never left state 0, A17)
+RE_DEFINE = re.compile(r"^define\s+(?:[\w\(\)]+\s+)*?(?P<ret>[^@]+?)\s+@(?P<name>[\w.$\"]+)\((?P<args>.*?)\)[^{()]*\{",)
 RE_CALL = re.compile(r"(?:call|invoke)\s+(?:\w+\s+)*?(?P<ret>[^@%]+?)\s+(?:\((?P<fty>[^)]*)\)\s+)?@(?P<name>[\w.$]+)\((?P<args>.*)\)")
 
 
@@ -169,10 +172,26 @@ def scan_one(job, clang):
         except OSError: pass
 
 
+_demangled = {}
+def demangle(name):
+    """C++ names: the address in a mangled name runs into the next length prefix
+    (_ZN12Object5212988distanceEv = Object521298::distance), match on the demangled form"""
+    if not name.startswith("_Z"):
+        return name
+    if name not in _demangled:
+        tool = os.path.join(os.path.dirname(ndk_clang()), "llvm-cxxfilt")
+        try:
+            _demangled[name] = subprocess.run([tool, name], capture_output=True, text=True).stdout.strip() or name
+        except OSError:
+            _demangled[name] = name
+    return _demangled[name]
+
+
 def def_symbol(name, addrs, ndefs):
     """the exported func_<ADDR> a decomp definition becomes (build_decomp primary symbol)"""
     if re.fullmatch(r"func_[0-9A-F]{8}", name):
         return name
+    name = demangle(name)
     for a in addrs:
         short = a.lstrip("0").upper()
         if a.upper() in name.upper() or (short and re.search(r"(?<![0-9A-Fa-f])%s(?![0-9A-Fa-f])" % short, name.upper())):

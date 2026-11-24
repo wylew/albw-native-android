@@ -24,6 +24,16 @@
 static struct sigaction g_prev;
 static uintptr_t g_text_lo, g_text_hi;
 
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <unistd.h>
+/* is [a, a+32) mapped (debug: the fault report must not fault) */
+static int readable(uintptr_t a) {
+    if (a < 0x10000u) return 0;
+    uintptr_t pg = a & ~(uintptr_t)4095;
+    unsigned char vec[2];
+    return mincore((void *)pg, ((a + 32 - pg) + 4095) & ~4095u, vec) == 0;
+}
 static int is_ret(uintptr_t a) {
     if ((a & 3) || a < g_text_lo + 4 || a >= g_text_hi) return 0;
     uint32_t w = *(const uint32_t *)(a - 4);
@@ -82,6 +92,53 @@ static void handler(int sig, siginfo_t *si, void *uc_v) {
         }
         OLOG("  outermost frames (innermost first):");
         for (int i = 0; i < no; i++) { uintptr_t o; const char *n = name_of(outer[i], &o); OLOG("    %s+%#lx", n, (unsigned long)o); }
+    }
+    else if (getenv("ALBW_FAULT_REPORT")) {
+        /* any other fault (debug, ALBW_FAULT_REPORT=1): registers, and for each register that
+         * points into memory the first words there and the words those point at */
+        const unsigned long *rg = &uc->uc_mcontext.arm_r0;   /* r0..r10, fp, ip, sp, lr, pc */
+        static const char *const nm[] = {"r0","r1","r2","r3","r4","r5","r6","r7","r8","r9","r10","fp","ip","sp","lr","pc"};
+        OLOG("fault %#lx at pc %#lx", (unsigned long)fa, (unsigned long)uc->uc_mcontext.arm_pc);
+        {   /* ALBW_FAULT_PEEK=<hex>[,<hex>...]: words at given addresses, and where the first points */
+            const char *pk = getenv("ALBW_FAULT_PEEK");
+            while (pk && *pk) {
+                char *end;
+                uintptr_t a = (uintptr_t)strtoul(pk, &end, 16);
+                if (end == pk) break;
+                if (readable(a)) {
+                    const uint32_t *w = (const uint32_t *)(a & ~3u);
+                    OLOG("  peek %08lx: %08x %08x %08x %08x %08x %08x %08x %08x", (unsigned long)a, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+                    if (readable(w[0])) {
+                        const uint32_t *x = (const uint32_t *)(uintptr_t)(w[0] & ~3u);
+                        OLOG("    [%08x]: %08x %08x %08x %08x %08x %08x", w[0], x[0], x[1], x[2], x[3], x[4], x[5]);
+                    }
+                }
+                pk = *end == ',' ? end + 1 : end;
+            }
+        }
+        {   /* return addresses on the stack (innermost first), with where they are */
+            uintptr_t p = uc->uc_mcontext.arm_sp & ~3u;
+            for (int k = 0; k < 4096 && readable(p); k++, p += 4) {
+                uintptr_t w = *(const uint32_t *)p, o;
+                if (!is_ret(w)) continue;
+                const char *n = name_of(w, &o);
+                OLOG("  stack %08lx: ret %s+%#lx", (unsigned long)p, n, (unsigned long)o);
+            }
+        }
+        for (int i = 0; i < 16; i++) {
+            uintptr_t v = rg[i], o;
+            const char *n = (v >= g_text_lo && v < g_text_hi) ? name_of(v + 4, &o) : NULL;
+            if (n) { OLOG("  %-3s %08lx  code %s+%#lx", nm[i], (unsigned long)v, n, (unsigned long)(o - 4)); continue; }
+            if (!readable(v) || i == 15) { OLOG("  %-3s %08lx", nm[i], (unsigned long)v); continue; }
+            const uint32_t *w = (const uint32_t *)(v & ~3u);
+            OLOG("  %-3s %08lx -> %08x %08x %08x %08x %08x %08x %08x %08x", nm[i], (unsigned long)v, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+            for (int k = 0; k < 4; k++) {
+                if (!readable(w[k])) continue;
+                const uint32_t *x = (const uint32_t *)(uintptr_t)(w[k] & ~3u);
+                uintptr_t oo; const char *xn = (x[0] >= g_text_lo && x[0] < g_text_hi) ? name_of(x[0] + 4, &oo) : "";
+                OLOG("        [+%d] %08x -> %08x %08x %08x %08x  %s", k * 4, w[k], x[0], x[1], x[2], x[3], xn);
+            }
+        }
     }
     /* hand on: ART's signal chain (libsigchain) treats a re-raise with the previous action as
      * SIG_DFL and aborts without the fault details; returning with the previous action installed

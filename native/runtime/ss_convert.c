@@ -52,7 +52,7 @@ extern uint32_t albw_ss_bias;
 #if UINTPTR_MAX == 0xFFFFFFFFu
 /* ------------------------------------------------------------------ images */
 typedef struct { uint32_t addr, size, flags; char name[24]; } Sec;
-typedef struct { uint32_t addr, size; const char *name, *file; uint8_t exec, sized, dup; } Sym;   /* dup: key not unique */
+typedef struct { uint32_t addr, size; const char *name, *file; uint8_t exec, sized, dup, local; } Sym;   /* dup: key not unique */
 typedef struct {
     Sec sec[96];
     int nsec;
@@ -74,7 +74,13 @@ static uint32_t fnv(const char *a, const char *b) {
     for (; *b; b++) h = (h ^ (uint8_t)*b) * 16777619u;
     return h;
 }
+/* key = name + file + binding: a global and a local of the same name are different symbols (the
+ * game object's locals carry no file symbol, so without the binding a global func_004F4A68 and
+ * a local copy named func_004F4A68 shared a key, were both marked ambiguous, and a delegate's
+ * pointer to the hit handler stayed at the old address: a call into the middle of a function
+ * after loading, A17) */
 static int same_key(const Sym *x, const Sym *y) {
+    if (x->local != y->local) return 0;
     if (strcmp(x->name, y->name)) return 0;
     if (!x->file != !y->file) return 0;
     return !x->file || !strcmp(x->file, y->file);
@@ -110,6 +116,7 @@ static int image_syms(Image *im, const Elf32_Sym *st, uint32_t n, const char *st
         d->size = s->st_size;
         d->name = nm;
         d->file = bind == STB_LOCAL ? file : NULL;
+        d->local = bind == STB_LOCAL;
         d->exec = (sc->flags & SHF_EXECINSTR) != 0;
         d->sized = s->st_size != 0;
     }
