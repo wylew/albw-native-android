@@ -345,3 +345,4 @@ then commit.
 | 2026-11-23 | Stop A14 fixed (freeze after a load: log thread lost its pipe). User confirms the Yuga cutscene renders correctly |
 | 2026-11-23 | Stop A15 fixed (Android runtime statics excluded from states); stack overflow reporter added. Waiting to see whether the next cutscene still crashes |
 | 2026-11-23 | Stop A16 fixed (converter mapped through duplicate local symbol names; a corrupted listener caused the cutscene stack overflow). The user's slot 1 carries the corrupted pointer: replay from the in-game save |
+| 2026-11-24 | App shown as "ALBW"; launcher icon from `icon.png` in the repository root (game artwork: git-ignored, copied into build/android/res by Gradle; without it the default icon). "Not filling the screen" was the layout's integer scale (On in the user's layout.cfg: 4x instead of 4.5x on 1080p) |

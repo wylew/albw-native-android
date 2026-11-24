@@ -14,6 +14,17 @@ if (!File(sdlDir, "CMakeLists.txt").exists()) {
 val gameLibs = File(project.findProperty("gameLibs")?.toString() ?: File(repoRoot, "build/android/jniLibs").path)
 val useGame = File(gameLibs, "armeabi-v7a/libalbw.so").exists() && !project.hasProperty("smoke")
 
+// App icon: icon.png in the repository root (not committed: game artwork, .gitignore), copied into a
+// generated resource directory; without it the system's default icon
+val iconSrc = File(repoRoot, "icon.png")
+val iconRes = File(repoRoot, "build/android/res")
+val hasIcon = iconSrc.exists()
+if (hasIcon) {
+    val dst = File(iconRes, "mipmap-xxxhdpi/ic_launcher.png")
+    dst.parentFile.mkdirs()
+    iconSrc.copyTo(dst, overwrite = true)
+}
+
 android {
     namespace = "org.albw.port"
     compileSdk = 35
@@ -25,6 +36,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = file("${repoRoot}/VERSION").readText().trim()
+        manifestPlaceholders["appIcon"] = if (hasIcon) "@mipmap/ic_launcher" else "@android:drawable/sym_def_app_icon"
         ndk {
             // 32-bit ARM first (README: Android port, Approach)
             abiFilters += listOf("armeabi-v7a")
@@ -52,6 +64,7 @@ android {
     }
 
     sourceSets["main"].java.directories.add("${sdlDir}/android-project/app/src/main/java")
+    if (hasIcon) sourceSets["main"].res.directories.add(iconRes.path)
 
     buildTypes {
         release {
