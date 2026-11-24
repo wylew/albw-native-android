@@ -847,6 +847,9 @@ static Surface *display_image(Display *d, int w, int h, int fmt) {
 }
 
 unsigned long g_render_draws;   /* draws executed (both paths; ALBW_PASS_TRACE) */
+static void vp_memo_save(void);   /* per-target viewport memory (render_set_target) */
+static void vp_memo_bind(uintptr_t color, int w, int h);
+
 int render_transfer(const void *src, int sw, int sh, int sfmt, void *dst, int dw, int dh, int dfmt, int flip, int aa) {
     if (!src || !dst || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 || !render_ready()) return 0;
     lock();
@@ -985,6 +988,8 @@ int render_transfer(const void *src, int sw, int sh, int sfmt, void *dst, int dw
             R.vp[0] = 0; R.vp[1] = 0; R.vp[2] = s->w; R.vp[3] = s->h;
             R.sc[0] = 0; R.sc[1] = 0; R.sc[2] = s->w; R.sc[3] = s->h;
             R.frag_dirty = true;
+            vp_memo_save();   /* also in the per-target memory: else the next bind of this buffer
+                               * brought the 240x320 back (the Yuga cutscene, A12) */
         }
         ok = 1;
         R.st.transfers++;
@@ -1563,7 +1568,6 @@ void render_set_widescreen(int rows) {
 /* ================================================================== immediate API */
 
 
-static void vp_memo_bind(uintptr_t color, int w, int h);   /* per-target viewport memory (below) */
 void render_set_target(uintptr_t color, int cfmt, uintptr_t depth, int dfmt, int w, int h) {
     if (!render_ready()) return;
     lock();
