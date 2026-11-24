@@ -384,3 +384,4 @@ then commit.
 | 2026-11-24 | Stop A17 fixed (frozen Buzz Blobs: float-returning C++ methods given returns-this thunks; converter regression from A16). Fault reporter `ALBW_FAULT_REPORT` |
 | 2026-11-24 | Save-state UI (States tab, toasts with pictures, L3 + D-pad slots, confirm load) and shader program binary cache, both checked on the RP5: messages and pictures shown, an older build's state still loads, shader build time 8.4 s -> 0.3 s |
 | 2026-11-24 | Stop A18 fixed (D-pad right crash: dropped call arguments in `003517A4`) |
+| 2026-11-24 | D-pad camera look-around checked (camera trace `ALBW_H3D_CAMTRACE`, autopilot holds): left / right pan and spring back (right was only blocked by the area edge at the test spot); up / down do nothing. Unknown whether the original pans vertically; left as is (user's call). Controller mapping verified (defaults, D-pad reaches the game as the 3DS D-pad) |
