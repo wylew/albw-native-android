@@ -28,6 +28,7 @@
  *   menu_style bar            Esc menu: bar (across the top) or centered (a panel in the middle)
  *   confirm_load 1            quick save-state loads (L3+R, F7) ask for a second press
  *   hd_textures 1             use an installed HD texture pack (Esc menu > Textures)
+ *   hd_cache 1                keep the pack's decoded images in a disk cache (off deletes it)
  *   hud_overlay 0             bottom-screen rupees and Y / B items on the main screen (single screen)
  *   snap 1                    custom editor: snap to window edges/centre, the other screen, integer sizes
  *   custom_front bottom       screen drawn last (on top) where custom rectangles overlap
@@ -80,6 +81,7 @@ typedef struct {
     int menu_centered;       /* Esc menu style: 0 bar across the top, 1 centered panel */
     int confirm_load;        /* quick loads (L3+R, F7) ask twice: 1 (default) or 0 */
     int hd_textures;         /* HD texture pack (render/hdtex.c) used when installed: 1 (default) or 0 */
+    int hd_cache;            /* disk cache of the pack's decoded images: 1 (default) or 0 (deleted) */
     int hud_overlay;         /* rupees + Y / B on the main screen when the bottom one is hidden: 0 (default) or 1 */
     int custom_front;        /* LAYOUT_SCREEN_TOP / _BOTTOM */
     LayoutRect custom[2];    /* normalized to the window */

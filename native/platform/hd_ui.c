@@ -101,3 +101,11 @@ static void hdui_set_enabled(int on) {
     render_hdtex_refresh();
     plat_layout_changed();
 }
+
+/* Textures > Disk cache: off deletes the cache files (the space back), on builds it again in the background */
+static void hdui_set_cache(int on) {
+    g_layout_cfg.hd_cache = on != 0;
+    hdtex_set_cache(on);
+    plat_layout_changed();
+    snprintf(g_menu_note, sizeof g_menu_note, "%s", on ? "Disk cache on: built in the background" : "Disk cache off: its files were deleted");
+}

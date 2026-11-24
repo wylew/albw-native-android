@@ -391,9 +391,20 @@ Henriko Magnifico) anywhere under the textures folder: `$ALBW_TEXTURES_DIR`, els
 - Checked on the RP5: import of ALBW 4K from Download/ALBW4K (539 files incl. its region subfolder),
   538 textures indexed, Hyrule Castle town drawn with the HD grass / cliffs / stones / water at 60
   fps. Region: the pack ships the USA folder only; its hashes fit the EU textures seen so far.
-- Debug: `ALBW_HDTEX=0` off, `ALBW_HDTEX_LOG=1` logs every decode. Not done: a disk cache of
-  decoded images (decode cost on first sight only), Import on the desktop (copy the files into the
-  folder instead).
+- **Disk cache** (Textures > Disk cache, `hd_cache` in layout.cfg, default on): every decoded
+  image is kept LZ4-compressed in `$ALBW_HDTEX_CACHE_DIR`, else `$XDG_CACHE_HOME/albw-port/hdtex`,
+  else `~/.cache/albw-port/hdtex` (Android: in the app's files folder), one file per texture with
+  the source PNG's size / modification time (a changed pack file is decoded again) and a CityHash64
+  of the data (a damaged file is deleted and rebuilt). Two threads: the loader serves the textures
+  the game asks for (cache file, else the PNG, then writes the file); the builder (nice 10) fills
+  the cache for the whole pack when idle, so even first sight reads the cache. Its first pass after
+  every scan deletes files no installed texture has (a removed pack). The menu line shows
+  `cached/total, MB`; off deletes every file. Measured on the PC on 100 pack textures: PNG decode
+  223 ms, LZ4 read 40 ms; ALBW 4K: 233 MB of cache (210 MB of PNGs), built in 3.8 s on the PC,
+  7.4 s on the RP5 (PNG 28.7 ms per megapixel, cache read 5.1).
+  An image evicted from the memory cache comes back from disk. `ALBW_HDTEX_CACHE=0` off this run.
+- Debug: `ALBW_HDTEX=0` off, `ALBW_HDTEX_LOG=1` logs every decode / cache read / build with its
+  time. Not done: Import on the desktop (copy the files into the folder instead).
 
 ### Shader cache
 
@@ -453,3 +464,4 @@ then commit.
 | 2026-11-24 | Code cheats: Invincible (checked: hearts stay full under Buzz Blob shocks), Money doesn't decrease, items / painting cost no energy (hooks in the recompiled functions); platform.o staleness fix in the link scripts |
 | 2026-11-24 | HD texture pack feasibility (Citra/Azahar format, "ALBW 4K 2.0b" by Henriko Magnifico: `tex1_<w>x<h>_<hash>_<fmt>_mip0.png`, 538 files, USA folder 00040000000EC300 only): the hash is **CityHash64 of the texture's raw 3DS bytes, level 0** (pack.json `use_new_hash` notwithstanding; xxHash and decoded-pixel variants tested, no match). 45 of the 73 textures in use in the user's Hyrule Castle town state matched (USA hashes fit the EU textures); PNGs are top row first (upload flipped to GL's bottom-first). Not implemented yet (plan: hash at upload in render.c, lazy PNG load on a worker, disk cache, Esc menu toggle / pack folder) |
 | 2026-11-24 | HD textures: pack support (render/hdtex.c, hook in render.c), Esc menu > Textures, Android import through the system folder picker. Checked on the RP5 with ALBW 4K (538 textures, 60 fps) |
+| 2026-11-24 | HD textures: disk cache of decoded images (LZ4 + checksum, loader / low-priority builder threads, stale files removed, Textures > Disk cache). Host tests (AddressSanitizer/UBSan clean): build, reads, damaged files rebuilt, rescan. RP5: whole pack built in 7.4 s in the background (PNG 28.7 ms/Mpx vs cache 5.1 ms/Mpx), Hyrule Castle town from a state: 45 textures from the cache, none decoded, 60 fps |

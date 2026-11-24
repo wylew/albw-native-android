@@ -77,7 +77,7 @@ static MenuVtx menu_vtx[MENU_MAX_VTX];
 static int menu_nv;
 
 enum { MI_RESUME, MI_WINDOWS, MI_SINGLE, MI_PRESET, MI_SWAP, MI_FILTER, MI_INTEGER, MI_RES, MI_FULLSCREEN, MI_EDIT,
-       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_DBG_HUD, MI_CHEAT_RESET, MI_HD_ON, MI_HD_IMPORT, MI_HD_STATUS, MI_COUNT };
+       MI_CONTROLS, MI_QUIT, MI_STYLE, MI_BIND_DEV, MI_BIND_RESET, MI_SS_SLOT, MI_SS_SAVE, MI_SS_LOAD, MI_DBG_EFT, MI_DBG_FOG, MI_DBG_FPS, MI_DBG_SPEED, MI_WIDE, MI_RESET, MI_LOG_COPY, MI_LOG_FOLDER, MI_LOG_PATH, MI_REPORT, MI_DBG_LOG, MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE, MI_SET_SEL, MI_SET_LOAD, MI_SS_CONFIRM, MI_DBG_HUD, MI_CHEAT_RESET, MI_HD_ON, MI_HD_IMPORT, MI_HD_STATUS, MI_HD_CACHE, MI_COUNT };
 
 typedef struct { const char *title; const int *items; int n; const char *const *notes; } MenuDef;
 #define MI_BIND_BASE 200   /* MI_BIND_BASE + InAction: one Controls row per action */
@@ -96,7 +96,7 @@ static const char *const menu_help_notes[] = {"Copy log, then paste it into the 
                                               "The log holds no ROM data or personal files", NULL};
 static const int menu_about_items[] = {MI_ABOUT_VER, MI_ABOUT_BUILD, MI_ABOUT_SITE};
 static const char *const menu_about_notes[] = {"Unofficial native port of A Link Between Worlds", "Needs your own ROM; none is included", NULL};
-static const int menu_tex_items[] = {MI_HD_ON, MI_HD_IMPORT, MI_HD_STATUS};
+static const int menu_tex_items[] = {MI_HD_ON, MI_HD_IMPORT, MI_HD_STATUS, MI_HD_CACHE};
 static const char *const menu_tex_notes[] = {"Citra / Azahar texture packs (tex1_*.png files),",
                                              "e.g. ALBW 4K. Import copies one into the app's",
                                              "textures folder; select Status to scan it again", NULL};
@@ -129,6 +129,7 @@ static void ssui_save_requested(int slot);
 static void hdui_import(void);
 static void hdui_poll(void);
 static void hdui_set_enabled(int on);
+static void hdui_set_cache(int on);
 static const int menu_speeds[] = {25, 50, 100, 200, 0};   /* Debug > Speed, percent (0 = unlimited) */
 
 static const char *MENU_VS =
@@ -261,6 +262,7 @@ static void menu_label(int i, char *buf, size_t n) {
     case MI_HD_ON: snprintf(buf, n, "HD textures    < %s >", g_layout_cfg.hd_textures ? "On" : "Off"); break;
     case MI_HD_IMPORT: snprintf(buf, n, "Import pack..."); break;
     case MI_HD_STATUS: snprintf(buf, n, "Status: %s", hdtex_status()); break;
+    case MI_HD_CACHE: snprintf(buf, n, "Disk cache   < %s >", g_layout_cfg.hd_cache ? hdtex_cache_status() : "Off"); break;
     case MI_BIND_DEV: snprintf(buf, n, "Device         < %s >", g_bind_pad ? "Controller" : "Keyboard"); break;
     case MI_BIND_RESET: snprintf(buf, n, "Reset %s controls to defaults", g_bind_pad ? "controller" : "keyboard"); break;
     case MI_WINDOWS: snprintf(buf, n, "Windows        < %s >", g_separate ? "Separate" : "Joined"); break;
@@ -583,6 +585,7 @@ static void menu_activate(int i, int dir) {
     switch (i) {
     case MI_HD_ON: hdui_set_enabled(!g_layout_cfg.hd_textures); break;
     case MI_HD_IMPORT: hdui_import(); break;
+    case MI_HD_CACHE: hdui_set_cache(!g_layout_cfg.hd_cache); break;
     case MI_HD_STATUS: hdtex_rescan(); render_hdtex_refresh(); snprintf(g_menu_note, sizeof g_menu_note, "Scanned: %s", hdtex_status()); break;
     case MI_CHEAT_RESET: g_cheat_reset_rupees = 1; snprintf(g_menu_note, sizeof g_menu_note, "Rupees reset to 0"); break;
     case MI_BIND_DEV: g_bind_pad ^= 1; break;

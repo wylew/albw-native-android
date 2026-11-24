@@ -459,7 +459,7 @@ int plat_init(const char *title, const PlatConfig *c) {
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
     snprintf(g_layout_base_title, sizeof g_layout_base_title, "%s", title);
     int have_layout_cfg = layout_load(&g_layout_cfg, NULL) == 0;  /* defaults if there is no layout.cfg yet */
-    hdtex_set_enabled(g_layout_cfg.hd_textures);   /* HD texture pack (render/hdtex.c) */
+    hdtex_configure(g_layout_cfg.hd_textures, g_layout_cfg.hd_cache);   /* HD texture pack (render/hdtex.c) */
     /* Steam Deck Game Mode / any gamescope session: one window is shown at a time, full screen, and
      * there may be no keyboard. Joined window, full screen (this run only); on the first start the
      * large-top layout (the bottom screen stays reachable through the touchscreen). */

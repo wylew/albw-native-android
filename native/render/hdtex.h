@@ -13,3 +13,7 @@ const char *hdtex_root(void);      /* the textures folder */
  * hdtex_poll returns 1); -1: no replacement */
 int hdtex_get(uint64_t hash, int w, int h, int fmt, const uint8_t **px, int *pw, int *ph);
 int hdtex_poll(void);              /* GL thread, once per frame */
+/* disk cache of decoded images (LZ4): on / off (off deletes it), "312 / 538, 210 MB (building)" */
+void hdtex_set_cache(int on);
+void hdtex_configure(int enabled, int cache);   /* both settings at start */
+const char *hdtex_cache_status(void);

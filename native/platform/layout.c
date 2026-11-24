@@ -55,6 +55,7 @@ void layout_defaults(LayoutConfig *c) {
     c->custom_front = LAYOUT_SCREEN_BOTTOM;
     c->confirm_load = 1;
     c->hd_textures = 1;
+    c->hd_cache = 1;
     c->hud_overlay = 0;   /* off by default: work in progress (README: HUD overlay) */
 #if defined(__ANDROID__)
     c->menu_centered = 1;   /* a controller-sized panel, not a bar across the top */
@@ -524,6 +525,7 @@ int layout_load(LayoutConfig *c, const char *path) {
         else if (!strcmp(key, "confirm_load")) c->confirm_load = iv != 0;
         else if (!strcmp(key, "hud_overlay")) c->hud_overlay = iv != 0;
         else if (!strcmp(key, "hd_textures")) c->hd_textures = iv != 0;
+        else if (!strcmp(key, "hd_cache")) c->hd_cache = iv != 0;
         else if (!strcmp(key, "custom_front")) c->custom_front = !strcmp(arg, "top") ? 0 : 1;
         else if (!strcmp(key, "single_screen")) c->single_screen = iv != 0;
         else if (!strcmp(key, "widescreen")) c->widescreen = iv != 0;
@@ -552,10 +554,10 @@ int layout_save(const LayoutConfig *c, const char *path) {
     layout_fmt_float(r, sizeof r, clamp_ratio(c->large_ratio));
     fprintf(f, "# ALBW native port: screen layout (shared by the SDL and Qt frontends; see native/platform/layout.h)\n"
                "windows %s\npreset %s\nswap %d\ninteger_scale %d\nlinear_filter %d\nlarge_ratio %s\nkeep_aspect %d\nsnap %d\n"
-               "render_scale %d\nmenu_style %s\ncustom_front %s\nsingle_screen %d\nwidescreen %d\nconfirm_load %d\nhud_overlay %d\nhd_textures %d\n",
+               "render_scale %d\nmenu_style %s\ncustom_front %s\nsingle_screen %d\nwidescreen %d\nconfirm_load %d\nhud_overlay %d\nhd_textures %d\nhd_cache %d\n",
             c->separate ? "separate" : "joined", layout_preset_key(c->preset), c->swap, c->integer_scale, c->linear_filter, r, c->keep_aspect, c->snap,
             c->render_scale < 1 ? 1 : c->render_scale, c->menu_centered ? "centered" : "bar", c->custom_front ? "bottom" : "top", c->single_screen, c->widescreen,
-            c->confirm_load, c->hud_overlay, c->hd_textures);
+            c->confirm_load, c->hud_overlay, c->hd_textures, c->hd_cache);
     for (int s = 0; s < 2; s++) {
         char v[4][32];
         layout_fmt_float(v[0], 32, c->custom[s].x);
