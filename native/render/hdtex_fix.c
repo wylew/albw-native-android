@@ -17,6 +17,13 @@
  *       MOVE    rect dx dy       moves rect by (dx, dy) texels; the uncovered rest becomes empty
  *       CLEAR   rect             makes rect fully transparent
  *       COPY    src dst          scales src into dst (bilinear), drawn over what is there
+ *       GLYPH   rect             draws a new glyph in rect (cleared first) from the DISC / LINE
+ *                                ops right after it, in the style of the ALBW 4K font: solid
+ *                                inside, the pack's soft glow around (alpha only, as the font)
+ *       DISC    {cx, cy} r d     a circle (centre in the rect's first two numbers)
+ *       LINE    {x0, y0, x1, y1} r d   a thick line with round ends, radius r
+ *                                detail d = 0: part of the glyph's shape; else the alpha
+ *                                inside is lowered to d (a socket, a seam, ...)
  *   - what: a line for the log ("hdtex: fixed ...").
  * Find the rectangles by looking at the pack PNG next to the original texture (ALBW_TEX_DUMP_DIR
  * dumps the originals). */
@@ -27,13 +34,13 @@
 #include <string.h>
 #include "hdtex.h"
 
-enum { OP_END = 0, OP_EXPECT, OP_MOVE, OP_CLEAR, OP_COPY };
+enum { OP_END = 0, OP_EXPECT, OP_MOVE, OP_CLEAR, OP_COPY, OP_GLYPH, OP_DISC, OP_LINE };
 typedef struct { float x0, y0, x1, y1; } FRect;
 typedef struct {
     int op;
-    FRect a;          /* EXPECT / MOVE / CLEAR: the rect; COPY: the source */
+    FRect a;          /* EXPECT / MOVE / CLEAR / GLYPH: the rect; COPY: the source; DISC / LINE: the shape */
     FRect b;          /* COPY: the destination */
-    float p, q;       /* EXPECT: lo, hi; MOVE: dx, dy */
+    float p, q;       /* EXPECT: lo, hi; MOVE: dx, dy; LINE: radius, detail; DISC: -, detail */
 } FixOp;
 typedef struct {
     uint64_t hash;
@@ -66,6 +73,21 @@ static const Fix FIXES[] = {
         {OP_COPY, IN_CELL(26, 2, 0.5f, 2.0f, 12.5f, 14.5f), IN_CELL(26, 1, 0.3f, 2.0f, 9.6f, 14.5f)},
         /* ... and the "r" (row 3, cell 2) scaled to the superscript "e"'s height, bottoms aligned, to its right */
         {OP_COPY, IN_CELL(3, 2, 0.25f, 6.75f, 9.75f, 20.12f), IN_CELL(26, 1, 9.0f, 2.03f, 17.9f, 14.53f)},
+    }},
+    /* the same sheet (after the fix above): the wand icon (row 26, cell 5) is drawn as a
+     * microphone. The game's wand: a thick handle from the lower left, a collar, a round head
+     * with a gem socket; drawn here as shapes in the pack's style, at 0.74 of the game's size
+     * around the cell centre (room for the glow, as the pack's other icons). Recognised by the solid
+     * microphone head right of where the wand's head ends. */
+    {0xD8373A57FACBA0EAull, 512, 1024, 11, "ALBW 4K font: wand icon drawn as a microphone", {
+        {OP_EXPECT, CELL(26, 10), NOR, 8, 255},                          /* the row is in place */
+        {OP_EXPECT, IN_CELL(26, 5, 15.2f, 7.9f, 15.9f, 8.6f), NOR, 235, 255},   /* microphone head (the wand's glow here) */
+        {OP_GLYPH, CELL(26, 5), NOR},
+        {OP_LINE, IN_CELL(26, 5, 3.82f, 17.62f, 7.66f, 13.78f), NOR, 1.29f, 0},      /* handle */
+        {OP_LINE, IN_CELL(26, 5, 7.22f, 10.22f, 9.88f, 12.89f), NOR, 1.41f, 0},      /* collar */
+        {OP_DISC, IN_CELL(26, 5, 12.1f, 9.34f, 0, 0), NOR, 3.03f, 0},             /* head */
+        {OP_LINE, IN_CELL(26, 5, 8.4f, 10.08f, 11.22f, 12.89f), NOR, 0.22f, 150},    /* seam head / collar */
+        {OP_DISC, IN_CELL(26, 5, 11.66f, 8.3f, 0, 0), NOR, 0.78f, 150},          /* gem socket */
     }},
 };
 
@@ -156,6 +178,47 @@ static int copy(uint8_t *px, int pw, int ph, float sx, float sy, const FixOp *o)
     return 1;
 }
 
+/* the ALBW 4K font's glow: alpha at a distance (texels) outside a glyph's edge, measured on the pack */
+static float glow(float d) {
+    static const float G[] = {180, 176, 163, 138, 102, 61, 29, 11, 0};   /* every 0.375 texel */
+    float k = d / 0.375f;
+    if (k <= 0) return G[0];
+    if (k >= 8) return 0;
+    int i = (int)k;
+    return G[i] + (G[i + 1] - G[i]) * (k - i);
+}
+static float shape_dist(const FixOp *o, float x, float y) {   /* signed, texels */
+    if (o->op == OP_DISC) return hypotf(x - o->a.x0, y - o->a.y0) - o->p;
+    float dx = o->a.x1 - o->a.x0, dy = o->a.y1 - o->a.y0, l2 = dx * dx + dy * dy;
+    float t = l2 > 0 ? clampf(((x - o->a.x0) * dx + (y - o->a.y0) * dy) / l2, 0, 1) : 0;
+    return hypotf(x - (o->a.x0 + t * dx), y - (o->a.y0 + t * dy)) - o->p;
+}
+/* GLYPH at o, its shapes after it; returns the op after the last shape */
+static const FixOp *glyph(uint8_t *px, int pw, int ph, float sx, float sy, const FixOp *o, const FixOp *end) {
+    int x0, y0, x1, y1;
+    to_px(&o->a, sx, sy, pw, ph, &x0, &y0, &x1, &y1);
+    const FixOp *s0 = o + 1, *s1 = s0;
+    while (s1 < end && (s1->op == OP_DISC || s1->op == OP_LINE)) s1++;
+    float aa = sx > sy ? sx : sy;   /* pixels per texel: edges antialiased over one pixel */
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            float tx = (x + 0.5f) / sx, ty = (y + 0.5f) / sy, d = 1e9f;
+            for (const FixOp *s = s0; s < s1; s++)
+                if (s->q == 0) { float v = shape_dist(s, tx, ty); if (v < d) d = v; }
+            float t = clampf(0.5f - d * aa, 0, 1);
+            float a = glow(d > 0 ? d : 0) * (1 - t) + 255 * t;
+            for (const FixOp *s = s0; s < s1; s++)
+                if (s->q > 0) {
+                    float td = clampf(0.5f - shape_dist(s, tx, ty) * aa, 0, 1);
+                    if (a > s->q) a = a * (1 - td) + s->q * td;
+                }
+            uint8_t *p = pix(px, pw, ph, x, y);
+            p[0] = p[1] = p[2] = 0;
+            p[3] = (uint8_t)lroundf(a);
+        }
+    return s1;
+}
+
 int hdtex_fix_apply(uint64_t hash, int w, int h, int fmt, uint8_t *px, int pw, int ph) {
     int done = 0;
     if (!px || w <= 0 || h <= 0) return 0;
@@ -167,13 +230,16 @@ int hdtex_fix_apply(uint64_t hash, int w, int h, int fmt, uint8_t *px, int pw, i
         int ok = 1;
         for (; o->op == OP_EXPECT && ok; o++) ok = expect(px, pw, ph, sx, sy, o);
         if (!ok) continue;   /* not the broken image (fixed pack, or fixed already) */
-        for (; o < f->ops + sizeof f->ops / sizeof *f->ops && o->op != OP_END; o++) {
+        const FixOp *end = f->ops + sizeof f->ops / sizeof *f->ops;
+        while (o < end && o->op != OP_END) {
+            if (o->op == OP_GLYPH) { o = glyph(px, pw, ph, sx, sy, o, end); continue; }
             if (o->op == OP_MOVE) move(px, pw, ph, sx, sy, o);
             else if (o->op == OP_CLEAR) {
                 int x0, y0, x1, y1;
                 to_px(&o->a, sx, sy, pw, ph, &x0, &y0, &x1, &y1);
                 if (x1 > x0 && y1 > y0) clear(px, pw, ph, x0, y0, x1, y1);
             } else if (o->op == OP_COPY) copy(px, pw, ph, sx, sy, o);
+            o++;
         }
         fprintf(stderr, "hdtex: fixed %s\n", f->what);
         done++;

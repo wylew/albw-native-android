@@ -407,13 +407,16 @@ Henriko Magnifico) anywhere under the textures folder: `$ALBW_TEXTURES_DIR`, els
   decoding (PNG or cache file), so a pack downloaded from its source works as is and its files stay
   untouched. Each fix is one table entry: the original texture (hash, size, format), `EXPECT` checks
   that recognise only the broken image (a corrected pack, or an image fixed already, is left
-  alone), then `MOVE` / `CLEAR` / `COPY` steps. Rectangles are in the original texture's texels, so
+  alone), then `MOVE` / `CLEAR` / `COPY` steps, or a new glyph drawn from circles and thick lines (`GLYPH`). Rectangles are in the original texture's texels, so
   one entry serves every resolution of a pack; how to add one is described at the top of the file.
   Fixes so far:
   - ALBW 4K main font sheet (`D8373A57FACBA0EA`, 512x1024 A4): the message icon row lacks the
     superscript "er", so every icon after it sits one cell early. Ravio's "which symbol" question
     showed wand / d-pad / bomb in place of bomb / wand / bow. The fix moves the row back and draws
     the "er" from the pack's own "e" and "r".
+  - The same sheet's wand icon is drawn as a microphone. It is replaced by a wand drawn from shapes
+    (`GLYPH` / `DISC` / `LINE`: solid inside, the pack's measured glow around), following the game's
+    icon (handle, collar, head with a gem socket) at 0.74 scale so the glow fits the cell.
   An image evicted from the memory cache comes back from disk. `ALBW_HDTEX_CACHE=0` off this run.
 - Debug: `ALBW_HDTEX=0` off, `ALBW_HDTEX_LOG=1` logs every decode / cache read / build with its
   time. Not done: Import on the desktop (copy the files into the folder instead).
@@ -479,3 +482,4 @@ then commit.
 | 2026-11-24 | HD textures: disk cache of decoded images (LZ4 + checksum, loader / low-priority builder threads, stale files removed, Textures > Disk cache). Host tests (AddressSanitizer/UBSan clean): build, reads, damaged files rebuilt, rescan. RP5: whole pack built in 7.4 s in the background (PNG 28.7 ms/Mpx vs cache 5.1 ms/Mpx), Hyrule Castle town from a state: 45 textures from the cache, none decoded, 60 fps |
 | 2026-11-25 | Boot stop A19: locked door / Ravio's shop crash; save-state conversion corrupted text in loaded files (tripwire placeholders as targets); converter fixed, verified on the RP5 |
 | 2026-11-25 | HD textures: pack fixes table (render/hdtex_fix.c). First entry: ALBW 4K's font sheet has its message icons one cell off (Ravio's symbol question showed the wrong items). Checked on the PC against the game's own sheet: every icon back in its cell, applied once only |
+| 2026-11-25 | Pack fixes: glyph drawing (`GLYPH` / `DISC` / `LINE`, the pack's glow measured); ALBW 4K's wand icon, drawn as a microphone by the pack, replaced by a drawn wand. PC: applied once, a second pass changes nothing |
