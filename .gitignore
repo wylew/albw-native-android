@@ -28,3 +28,4 @@ native/robust/systemic3/prev_*/
 
 # HD texture packs (third-party game art): imported on the device, never committed
 /ALBW 4K*/
+/.idea/
