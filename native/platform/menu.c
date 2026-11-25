@@ -23,7 +23,7 @@
  *         Maiamais, full hearts, 5 small keys, infinite power meter; code cheats: invincible, money
  *         doesn't decrease, items / painting cost no energy; Reset rupees. Session only.
  *  Debug  Logging (starts a log file when run from a terminal), Particles, Fog, Show FPS (window title), Speed (25 % .. unlimited),
- *         HUD overlay (rupees and Y / B on the main screen in single-screen mode: platform/hud_overlay.c). The retail code has
+ *         HUD overlay (rupees and the Y item on the main screen in single-screen mode: platform/hud_overlay.c). The retail code has
  *         no hidden debug menu to expose (searched: the only developer leftovers are the course
  *         list's E3Field / Test* names, whose course files are not on the ROM, the Dbg:* heaps and
  *         the event flag name cmn_debug_goal_on), so this menu holds the port's own switches.

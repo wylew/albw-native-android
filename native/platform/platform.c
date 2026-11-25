@@ -1458,7 +1458,7 @@ static uint32_t route_step(int *pad_x, int *pad_y) {
 }
 
 #include "selector.c"   /* single-screen bottom-screen selector (D-pad + A) */
-#include "hud_overlay.c"   /* rupees + Y / B buttons on the main screen (single screen) */
+#include "hud_overlay.c"   /* rupees + item buttons on the main screen (single screen) */
 #include "cheats.c"   /* Esc menu > Cheats: value cheats on Link's status block */
 
 int plat_poll(void) {
@@ -1683,7 +1683,7 @@ static void plat_composite(const Layout *l) {
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
     sel_composite(l);   /* single-screen selector over the bottom screen (selector.c) */
-    hud_composite(l);   /* rupees and Y / B over the top screen when the bottom one is hidden */
+    hud_composite(l);   /* rupees and items over the top screen when the bottom one is hidden */
     if (!g_separate || l->visible[SCREEN_TOP]) ssui_draw(l->ww, l->wh);   /* save-state toast */
 }
 
