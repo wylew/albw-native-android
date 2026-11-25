@@ -336,20 +336,23 @@ data layout) do not load.
 ### HUD overlay (single-screen mode)
 
 `platform/hud_overlay.c`, Esc menu Debug > HUD overlay (`hud_overlay` in layout.cfg, **default off**,
-work in progress): while the bottom screen is hidden, parts of it are drawn on the main screen at
-the top screen's scale:
-- the rupee counter in the top right corner (soft edges);
-- the item buttons stacked on the left just above the power meter (the bottom right stays free for
-  the game's button prompts): each the item's icon in a small circle (28 px of the 240-line screen,
-  the icon at ~0.6 of its bottom-screen size) with a light ring, the button's badge at its upper
-  left as on the bottom screen. Y sits lowest; X goes above it once something is mapped to X
-  (`HUD_X_ON`, its regions are in place). The B button (the sword) is not shown.
-Copied from the bottom screen's image (the game draws it every frame), positions from the game's
-layouts (`Lyt_Game.arc`: `Gm_MainSystemItemB` places the slot part `Gm_SelectItemRootBtn` for Y at
-(129, -21) and X at (129, 43); in the part the 32 x 32 item at (0, 3), the badge at (-24, 27)) and
-the map page measurement (rupees 254,3 65x24). The page is checked every 10 frames from a few
-pixels (as `selector.c`); the regions are copied into a cache texture only on the map page, so
-other pages (Items, Gear, dungeon map, warp menu) keep the last good copy.
+work in progress): while the bottom screen is hidden, its item buttons are drawn on the main screen
+at the top screen's scale, stacked on the left just above the power meter (the bottom right stays
+free for the game's button prompts): each the item's icon in a small circle (28 px of the 240-line
+screen, the icon at ~0.6 of its bottom-screen size) with a light ring, the button's badge at its
+upper left as on the bottom screen. Y sits lowest; X goes above it once something is mapped to X
+(`HUD_X_ON`, its regions are in place). Not shown: the rupee counter and the B button (the sword).
+- Copied from the bottom screen's image (the game draws it every frame), positions from the game's
+  layouts (`Lyt_Game.arc`: `Gm_MainSystemItemB` places the slot part `Gm_SelectItemRootBtn` for Y
+  at (129, -21) and X at (129, 43); in the part the 32 x 32 item at (0, 3), the badge at
+  (-24, 27)). The page is checked every 10 frames from a few pixels (as `selector.c`); the regions
+  are copied into a cache texture only on the map page, so other pages (Items, Gear, dungeon map,
+  warp menu) keep the last good copy.
+- Fades with the scene: each frame the top screen is shrunk to 8 x 8 samples on the GPU (a blit,
+  no read back) and the shader counts the ones that are not black; loading screens (black but for
+  the Triforce icon) and the game's fades to black hide the overlay, dark rooms keep it.
+- Checked on the RP5 (Eastern Palace entrance): the bow centred in its circle, the Y badge at its
+  upper left, the lower right clear.
 
 ### Cheats
 
@@ -490,3 +493,4 @@ then commit.
 | 2026-11-25 | HD textures: pack fixes table (render/hdtex_fix.c). First entry: ALBW 4K's font sheet has its message icons one cell off (Ravio's symbol question showed the wrong items). Checked on the PC against the game's own sheet: every icon back in its cell, applied once only |
 | 2026-11-25 | Pack fixes: glyph drawing (`GLYPH` / `DISC` / `LINE`, the pack's glow measured); ALBW 4K's wand icon, drawn as a microphone by the pack, replaced by a drawn wand. PC: applied once, a second pass changes nothing |
 | 2026-11-25 | HUD overlay redesign: no sword; the Y item as its icon in a small ringed circle with the Y badge at its upper left, stacked on the left above the power meter (X slot reserved above it); positions from the game's layouts. Shaders checked with glslangValidator (GLSL ES 3.00); not yet seen on the RP5 |
+| 2026-11-25 | HUD overlay: rupee counter removed; the overlay fades out on loading screens and fades to black (8 x 8 top-screen samples counted in the shader). RP5: the new item circle checked in the Eastern Palace |

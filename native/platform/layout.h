@@ -29,7 +29,7 @@
  *   confirm_load 1            quick save-state loads (L3+R, F7) ask for a second press
  *   hd_textures 1             use an installed HD texture pack (Esc menu > Textures)
  *   hd_cache 1                keep the pack's decoded images in a disk cache (off deletes it)
- *   hud_overlay 0             bottom-screen rupees and Y item on the main screen (single screen)
+ *   hud_overlay 0             bottom-screen Y item button on the main screen (single screen)
  *   snap 1                    custom editor: snap to window edges/centre, the other screen, integer sizes
  *   custom_front bottom       screen drawn last (on top) where custom rectangles overlap
  *   widescreen 0              1 = 16:9 top screen: the game draws a wider view (F10)
@@ -82,7 +82,7 @@ typedef struct {
     int confirm_load;        /* quick loads (L3+R, F7) ask twice: 1 (default) or 0 */
     int hd_textures;         /* HD texture pack (render/hdtex.c) used when installed: 1 (default) or 0 */
     int hd_cache;            /* disk cache of the pack's decoded images: 1 (default) or 0 (deleted) */
-    int hud_overlay;         /* rupees + Y item on the main screen when the bottom one is hidden: 0 (default) or 1 */
+    int hud_overlay;         /* the Y item button on the main screen when the bottom one is hidden: 0 (default) or 1 */
     int custom_front;        /* LAYOUT_SCREEN_TOP / _BOTTOM */
     LayoutRect custom[2];    /* normalized to the window */
     int custom_visible[2];
