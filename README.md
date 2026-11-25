@@ -403,6 +403,17 @@ Henriko Magnifico) anywhere under the textures folder: `$ALBW_TEXTURES_DIR`, els
   `cached/total, MB`; off deletes every file. Measured on the PC on 100 pack textures: PNG decode
   223 ms, LZ4 read 40 ms; ALBW 4K: 233 MB of cache (210 MB of PNGs), built in 3.8 s on the PC,
   7.4 s on the RP5 (PNG 28.7 ms per megapixel, cache read 5.1).
+- **Pack fixes** (`render/hdtex_fix.c`): known mistakes in packs are repaired in memory right after
+  decoding (PNG or cache file), so a pack downloaded from its source works as is and its files stay
+  untouched. Each fix is one table entry: the original texture (hash, size, format), `EXPECT` checks
+  that recognise only the broken image (a corrected pack, or an image fixed already, is left
+  alone), then `MOVE` / `CLEAR` / `COPY` steps. Rectangles are in the original texture's texels, so
+  one entry serves every resolution of a pack; how to add one is described at the top of the file.
+  Fixes so far:
+  - ALBW 4K main font sheet (`D8373A57FACBA0EA`, 512x1024 A4): the message icon row lacks the
+    superscript "er", so every icon after it sits one cell early. Ravio's "which symbol" question
+    showed wand / d-pad / bomb in place of bomb / wand / bow. The fix moves the row back and draws
+    the "er" from the pack's own "e" and "r".
   An image evicted from the memory cache comes back from disk. `ALBW_HDTEX_CACHE=0` off this run.
 - Debug: `ALBW_HDTEX=0` off, `ALBW_HDTEX_LOG=1` logs every decode / cache read / build with its
   time. Not done: Import on the desktop (copy the files into the folder instead).
@@ -467,3 +478,4 @@ then commit.
 | 2026-11-24 | HD textures: pack support (render/hdtex.c, hook in render.c), Esc menu > Textures, Android import through the system folder picker. Checked on the RP5 with ALBW 4K (538 textures, 60 fps) |
 | 2026-11-24 | HD textures: disk cache of decoded images (LZ4 + checksum, loader / low-priority builder threads, stale files removed, Textures > Disk cache). Host tests (AddressSanitizer/UBSan clean): build, reads, damaged files rebuilt, rescan. RP5: whole pack built in 7.4 s in the background (PNG 28.7 ms/Mpx vs cache 5.1 ms/Mpx), Hyrule Castle town from a state: 45 textures from the cache, none decoded, 60 fps |
 | 2026-11-25 | Boot stop A19: locked door / Ravio's shop crash; save-state conversion corrupted text in loaded files (tripwire placeholders as targets); converter fixed, verified on the RP5 |
+| 2026-11-25 | HD textures: pack fixes table (render/hdtex_fix.c). First entry: ALBW 4K's font sheet has its message icons one cell off (Ravio's symbol question showed the wrong items). Checked on the PC against the game's own sheet: every icon back in its cell, applied once only |

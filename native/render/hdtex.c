@@ -528,6 +528,7 @@ static void *worker(void *arg) {
         double t0 = now_s();
         if (!builder && have_src && cache_on && (px = cache_read(&j, &src, &w, &h, &fsize, &bad))) from_disk = 1;
         if (!px && have_src) px = png_file(j.path, &w, &h);
+        if (px) hdtex_fix_apply(j.hash, j.w, j.h, j.fmt, px, w, h);   /* known pack mistakes (hdtex_fix.c) */
         double t1 = now_s();
         int write = px && !from_disk && cache_on, ok = px != NULL;
         uint8_t *own = px;      /* freed here unless the entry takes it */

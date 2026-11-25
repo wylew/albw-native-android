@@ -17,3 +17,6 @@ int hdtex_poll(void);              /* GL thread, once per frame */
 void hdtex_set_cache(int on);
 void hdtex_configure(int enabled, int cache);   /* both settings at start */
 const char *hdtex_cache_status(void);
+/* hdtex_fix.c: repairs a decoded pack image (RGBA, bottom row first) with a known mistake, in
+ * place; the number of fixes applied (0: none known, or not the broken image) */
+int hdtex_fix_apply(uint64_t hash, int w, int h, int fmt, uint8_t *px, int pw, int ph);
