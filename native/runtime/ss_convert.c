@@ -634,6 +634,7 @@ static uint32_t map_word(Conv *c, const uint8_t *at, uint32_t v, int pol) {
     for (int i = 0; i < c->cur->nsec; i++)
         if (!strcmp(c->cur->sec[i].name, os->name)) { ns = &c->cur->sec[i]; break; }
     if (ns && ns->addr == os->addr && !strncmp(os->name, ".albw_", 6)) return v;
+    if (!strcmp(os->name, ".tripwire_data")) { c->unmapped++; logw(c, at, v, v, "skip-tripwire", os->name, 0); return v; }
     int f, k = sym_at(&c->old, v, &f);
     const Sym *s = NULL, *n = NULL;
     for (int i = 0; i < k; i++) {
@@ -644,6 +645,13 @@ static uint32_t map_word(Conv *c, const uint8_t *at, uint32_t v, int pol) {
         if (y) { s = x; n = y; break; }
     }
     uint32_t off = s ? v - s->addr : 0;
+    /* tripwire data blocks (tools/gen_stubs.py: 4 KiB placeholders for unresolved data symbols, now in
+     * .tripwire_data; older builds had them in .bss): nothing points into them, a word that does is
+     * data that looks like an address (40 file words in one load of the user's slot 3) */
+    if (n) {
+        const Sec *nsec = sec_of(c->cur, n->addr);
+        if (nsec && !strcmp(nsec->name, ".tripwire_data")) { c->unmapped++; logw(c, at, v, v, "skip-tripwire", s->name, off); return v; }
+    }
     if (os->flags & SHF_EXECINSTR) {
         if (!s) return v;
         if (off == 0) {
@@ -756,12 +764,34 @@ static uint32_t map_word(Conv *c, const uint8_t *at, uint32_t v, int pol) {
     return v;
 }
 
+/* four printable ASCII bytes: text, or a string's tail when `nul_ok` and it ends in a NUL first */
+static int text4(const uint8_t *q, int nul_ok) {
+    for (int i = 0; i < 4; i++) {
+        if (q[i] >= 0x20 && q[i] < 0x7F) continue;
+        return nul_ok && q[i] == 0 && i > 0;
+    }
+    return 1;
+}
+
 static void reloc(Conv *c, uint8_t *p, size_t len, uint32_t addr, int pol) {
     size_t s0 = addr ? (4 - addr % 4) % 4 : 0;
     c->log_base = p;
     c->log_addr = addr;
     for (size_t o = s0; o + 4 <= len; o += 4) {
-        uint32_t v = rd32(p + o), w = map_word(c, p + o, v, pol);
+        uint32_t v = rd32(p + o);
+        /* text in heap memory (loaded files: byml keys, names) whose bytes read as an address in the
+         * binary: "d_Ac" of FieldLight_22_BlackSmithKid_Act1_00 in World/Byaml/FlowChart.byaml is
+         * 0x63415F64. A pointer is not surrounded by text: printable on both sides (the next word may
+         * end the string) = a string, left alone. Every load across builds rewrote such words, the
+         * file failed its check, no area loaded its flowcharts and doors / NPCs crashed (README:
+         * Android stop A19) */
+        if (pol == P_HEAP && v >= c->old_lo && v < c->old_hi && o >= 4 && o + 8 <= len && text4(p + o, 0) &&
+            text4(p + o - 4, 0) && (text4(p + o + 4, 1) || p[o + 4] == 0)) {
+            c->unmapped++;
+            logw(c, p + o, v, v, "skip-text", "", 0);
+            continue;
+        }
+        uint32_t w = map_word(c, p + o, v, pol);
         if (w != v) memcpy(p + o, &w, 4);
     }
 }
@@ -907,6 +937,8 @@ int ss_convert(SsBuf *st, const SsLayout *lay, const SsRangeInfo *cur, int ncur,
             if (x->exec || x->addr < oa || x->addr >= oa + on) continue;
             const Sym *y = find_key(&g_self, x);
             if (!y) { lost += x->size; continue; }
+            const Sec *ysec = sec_of(&g_self, y->addr);
+            if (ysec && !strcmp(ysec->name, ".tripwire_data")) continue;   /* placeholders: nothing to keep */
             uint32_t len = x->size < y->size ? x->size : y->size;
             if (x->addr + len > oa + on) len = oa + on - x->addr;
             int done = 0;
