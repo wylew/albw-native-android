@@ -355,6 +355,11 @@ save from before the unlock). Not shown: the rupee counter and the B button (the
 - The badges never change, so the shader draws them: a brown disc with the letter (Y, X) in the
   ring's light tan (more readable on the wood than the game's dark letter; the dungeon map does not
   show the Y badge at all).
+- Follows the game's own HUD: every 5 frames four points of the power meter's cream inner rim are
+  read from the top screen (3 of 4 must match; redder than the sandy floors behind it). When the
+  game hides its HUD (cutscenes, conversations) the overlay fades out with it, and back in after.
+  Checked offline on six RP5 screenshots: the meter found in every gameplay one, none in a
+  Sahasrahla cutscene.
 - Fades with the scene: each frame the top screen is shrunk to 8 x 8 samples on the GPU (a blit,
   no read back) and the shader counts the ones that are not black; loading screens (black but for
   the Triforce icon) and the game's fades to black hide the overlay, dark rooms keep it.
@@ -505,3 +510,4 @@ then commit.
 | 2026-11-25 | HUD overlay: the item circle centred on the power meter, widescreen included (meter measured at 20 px of 400, 33.7 of 427) |
 | 2026-11-25 | HUD overlay: the Y slot itself is checked (works on the dungeon map, no copies during fades); badges drawn by the shader in the ring's light tan instead of copied. RP5: icon and badge right after a state load in the Eastern Palace |
 | 2026-11-25 | HUD overlay: X circle shown only once the game has opened the X button (its slot found on the bottom screen, 64 px above Y, measured on a later-game map page); hidden again on an earlier save |
+| 2026-11-25 | HUD overlay hides with the game's own HUD (power meter rim checked on the top screen): cutscenes and conversations |

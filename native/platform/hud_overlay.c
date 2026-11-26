@@ -30,6 +30,10 @@
  * with thin dark rims around it, the button's badge at its upper left as on the bottom screen.
  * Y is the lowest (its circle ends at HUD_STACK_BOTTOM), X above it.
  *
+ * Follows the game's own HUD: every 5 frames four pixels of the power meter's cream inner rim
+ * (both sides, two heights; it stays while the purple drains) are read from the top screen; when
+ * the game hides its HUD (cutscenes, conversations) the meter is gone and the overlay fades out
+ * over ~6 frames, and back in when the meter returns (hud_check_meter).
  * Fades with the scene: every frame the top screen is shrunk to 8 x 8 samples (a blit, on the GPU,
  * no read back) and the shader counts the samples that are not black; with few of them (a loading
  * screen: black but for the Triforce icon; the game's fades to black) the overlay fades out. */
@@ -48,7 +52,9 @@ static const int HUD_ATLAS_X[HUD_N] = {0, 36};
 #define HUD_LUM_N 8             /* top screen samples per side for the fade */
 
 static GLuint hud_prog, hud_tex, hud_fbo, hud_lum_tex, hud_lum_fbo;
-static GLint hud_loc_rect, hud_loc_uvr, hud_loc_ring, hud_loc_mode, hud_loc_letter;
+static GLint hud_loc_rect, hud_loc_uvr, hud_loc_ring, hud_loc_mode, hud_loc_letter, hud_loc_vis;
+static float hud_vis;          /* follows the game's HUD (the power meter): 0..1 */
+static int hud_meter_seen;
 static int hud_scale_built, hud_have, hud_slot_seen, hud_have_x, hud_x_open;
 
 /* mode 1: item circle: the texture inside, from `ring` of the radius a light ring with dark rims;
@@ -62,7 +68,7 @@ static const char *HUD_VS =
 static const char *HUD_FS =
     "#version 330 core\n"
     "in vec2 uv; in vec2 lp; uniform sampler2D tex; uniform sampler2D lum; uniform float ring; uniform int mode;\n"
-    "uniform int letter; out vec4 o;\n"
+    "uniform int letter; uniform float vis; out vec4 o;\n"
     "float seg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a;\n"
     "  return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)); }\n"
     "void main(){\n"
@@ -89,7 +95,7 @@ static const char *HUD_FS =
     "    float qa = max(fwidth(q.x), 1e-4);\n"
     "    c = mix(c, vec3(0.96, 0.92, 0.78), 1.0 - smoothstep(0.15 - qa, 0.15 + qa, s));   /* the ring's light tan */\n"
     "  }\n"
-    "  o = vec4(c, a * show); }\n";
+    "  o = vec4(c, a * show * vis); }\n";
 
 static GLuint hud_target_tex(GLuint *fbo, GLuint *tex, int w, int h, GLint filter) {
     if (!*tex) glGenTextures(1, tex);
@@ -116,6 +122,7 @@ static int hud_init(int sc) {
         hud_loc_ring = glGetUniformLocation(hud_prog, "ring");
         hud_loc_mode = glGetUniformLocation(hud_prog, "mode");
         hud_loc_letter = glGetUniformLocation(hud_prog, "letter");
+        hud_loc_vis = glGetUniformLocation(hud_prog, "vis");
         glUseProgram(hud_prog);
         glUniform1i(glGetUniformLocation(hud_prog, "tex"), 0);
         glUniform1i(glGetUniformLocation(hud_prog, "lum"), 1);
@@ -175,6 +182,32 @@ static int hud_check_slot(const Target *bt, int slot, int *still_out) {
     return seen;
 }
 
+/* the game's power meter on the top screen (400-column coordinates, centred in widescreen): its
+ * cream inner rim (~220, 184, 146: redder than the sandy floors behind it, ~230, 217, 156) at x 10.3
+ * and 30.5, y 189 and 205; 3 of the 4 points suffice */
+static int hud_cream(const uint8_t *p) {
+    return p[0] > 150 && p[1] > 110 && p[2] > 80 && p[0] >= p[1] + 25 && p[1] > p[2] && p[0] - p[2] >= 40 && p[0] - p[2] <= 130;
+}
+static void hud_check_meter(const Target *tt) {
+    static const float PT[4][2] = {{10.3f, 189}, {30.5f, 189}, {10.3f, 205}, {30.5f, 205}};
+    float off = (LAYOUT_TOP_W - 400) * 0.5f, sx = (float)tt->w / LAYOUT_TOP_W, sy = (float)tt->h / 240;
+    int n = 0;
+    uint8_t px[4][4] = {{0}};
+    glBindFramebuffer(0x8CA8 /* GL_READ_FRAMEBUFFER */, tt->fbo);
+    for (int i = 0; i < 4; i++) {
+        glReadPixels((int)((PT[i][0] + off) * sx), tt->h - 1 - (int)(PT[i][1] * sy), 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px[i]);
+        n += hud_cream(px[i]);
+    }
+    glBindFramebuffer(0x8CA8, 0);
+    int seen = n >= 3;
+    static int lg = -1;
+    if (lg < 0) lg = getenv("ALBW_HUD_LOG") != NULL;
+    if (lg && seen != hud_meter_seen)
+        fprintf(stderr, "hud: power meter %s (%d of 4; %d,%d,%d)\n", seen ? "shown: overlay in" : "hidden: overlay out", n,
+                px[0][0], px[0][1], px[0][2]);
+    hud_meter_seen = seen;
+}
+
 /* one atlas region at window pixels (x, y, w, h); the region fills the middle `fill` of the quad
  * (mode 1: the ring outside it covers what is sampled beyond the region) */
 static void hud_draw(const Layout *l, int i, float x, float y, float w, float h, int mode, float fill, int letter) {
@@ -187,6 +220,7 @@ static void hud_draw(const Layout *l, int i, float x, float y, float w, float h,
     glUniform1f(hud_loc_ring, HUD_RING);
     glUniform1i(hud_loc_mode, mode);
     glUniform1i(hud_loc_letter, letter);
+    glUniform1f(hud_loc_vis, hud_vis);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
@@ -220,7 +254,10 @@ static void hud_composite(const Layout *l) {
         hud_have = 1;
         hud_have_x |= x_seen;
     }
-    if (!hud_have) { glBindFramebuffer(GL_FRAMEBUFFER, 0); return; }
+    if (frame % 5 == 1) hud_check_meter(tt);
+    hud_vis += hud_meter_seen ? 1.0f / 6 : -1.0f / 6;
+    hud_vis = hud_vis < 0 ? 0 : hud_vis > 1 ? 1 : hud_vis;
+    if (!hud_have || hud_vis <= 0) { glBindFramebuffer(GL_FRAMEBUFFER, 0); return; }
     /* the scene samples for the fade (the top screen as the game drew it, before the overlay) */
     glBindFramebuffer(0x8CA8 /* READ */, tt->fbo);
     glBindFramebuffer(0x8CA9 /* DRAW */, hud_lum_fbo);
