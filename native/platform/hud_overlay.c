@@ -18,7 +18,8 @@
  * Not shown: the rupee counter and the B button (the sword).
  *
  * Drawn at the top screen's scale (k = its rect height / 240), in top-screen pixels, stacked on the
- * left above the power meter (meter 8..32 x 150..222 on the 400 x 240 screen; the bottom right is
+ * left above the power meter, centred on it (meter 8..32 x 150..222 on the 400 x 240 screen, further
+ * right by half the extra width in widescreen; the bottom right is
  * kept free for the game's button prompts): each button a circle of HUD_ITEM_D pixels, the item
  * icon (the copied disc, the slot's dark button behind it) in the middle HUD_RING, a light ring
  * with thin dark rims around it, the button's badge at its upper left as on the bottom screen.
@@ -37,7 +38,7 @@ static const int HUD_ATLAS_X[HUD_N] = {0, 36, 52, 88};
 #define HUD_ITEM_D 28.0f        /* item circle diameter, ring included (top-screen pixels) */
 #define HUD_RING 0.8f           /* the copied 36 px disc fills this much of the diameter (icon at ~0.62) */
 #define HUD_BADGE_D 11.0f       /* badge diameter */
-#define HUD_STACK_X 22.0f       /* circle centre x: over the power meter (8..32) */
+#define HUD_STACK_X 20.0f       /* circle centre x: the power meter's centre (its bar 12..27 on the 400-wide screen) */
 #define HUD_STACK_BOTTOM 146.0f /* lowest circle's bottom edge: just above the meter (top 150) */
 #define HUD_STACK_GAP 6.0f      /* between two circles (room for the upper one's badge row) */
 #define HUD_LUM_N 8             /* top screen samples per side for the fade */
@@ -177,7 +178,9 @@ static void hud_composite(const Layout *l) {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, hud_tex);
     /* item buttons: Y lowest, X above it */
-    const float d = HUD_ITEM_D * k, bd = HUD_BADGE_D * k, cx = r->x + HUD_STACK_X * k;
+    /* widescreen: the game lays its 2D HUD out for 400 columns, centred (the meter moves right by
+     * half the extra width: measured 33.7 at 427), so the stack follows */
+    const float d = HUD_ITEM_D * k, bd = HUD_BADGE_D * k, cx = r->x + (HUD_STACK_X + (LAYOUT_TOP_W - 400) * 0.5f) * k;
     float cy = r->y + (HUD_STACK_BOTTOM - HUD_ITEM_D / 2) * k;
     for (int b = 0; b < 2; b++) {
         int item = b == 0 ? HUD_Y_ITEM : HUD_X_ITEM;

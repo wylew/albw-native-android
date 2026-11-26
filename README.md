@@ -337,7 +337,8 @@ data layout) do not load.
 
 `platform/hud_overlay.c`, Esc menu Debug > HUD overlay (`hud_overlay` in layout.cfg, **default off**,
 work in progress): while the bottom screen is hidden, its item buttons are drawn on the main screen
-at the top screen's scale, stacked on the left just above the power meter (the bottom right stays
+at the top screen's scale, stacked on the left just above the power meter and centred on it (also
+in widescreen, where the game moves its HUD right by half the extra width) (the bottom right stays
 free for the game's button prompts): each the item's icon in a small circle (28 px of the 240-line
 screen, the icon at ~0.6 of its bottom-screen size) with a light ring, the button's badge at its
 upper left as on the bottom screen. Y sits lowest; X goes above it once something is mapped to X
@@ -494,3 +495,4 @@ then commit.
 | 2026-11-25 | Pack fixes: glyph drawing (`GLYPH` / `DISC` / `LINE`, the pack's glow measured); ALBW 4K's wand icon, drawn as a microphone by the pack, replaced by a drawn wand. PC: applied once, a second pass changes nothing |
 | 2026-11-25 | HUD overlay redesign: no sword; the Y item as its icon in a small ringed circle with the Y badge at its upper left, stacked on the left above the power meter (X slot reserved above it); positions from the game's layouts. Shaders checked with glslangValidator (GLSL ES 3.00); not yet seen on the RP5 |
 | 2026-11-25 | HUD overlay: rupee counter removed; the overlay fades out on loading screens and fades to black (8 x 8 top-screen samples counted in the shader). RP5: the new item circle checked in the Eastern Palace |
+| 2026-11-25 | HUD overlay: the item circle centred on the power meter, widescreen included (meter measured at 20 px of 400, 33.7 of 427) |
