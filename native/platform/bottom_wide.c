@@ -3,8 +3,10 @@
  * (layout.c layout_game_rect); the two side strips (~53 columns each) are filled here with the
  * game's own wood: Archive/Lyt_Game.arc timg/Wood_01.bflim (256 x 256 ETC1), the dark wood of the
  * bottom screen's right-hand panel, read from the ROM at the first use (sdk/fs.c albw_romfs_read),
- * tinted as the game draws that panel (texture mean ~71, 47, 19, the panel ~75, 41, 9) and drawn at
- * 1 texel per 3DS pixel. With an HD texture pack holding it (ALBW 4K does) the HD image is used, as
+ * drawn at 1 texel per 3DS pixel. The image is stored rotated (the BFLIM's swizzle 8: the grain
+ * runs along the stored columns), so it is sampled turned 90 degrees: the grain runs horizontally as
+ * on the panel. The game draws it nearly untinted: x1.07 matches the panel (HD: strip ~71,38,9 x1.07
+ * against the panel's ~76,41,9 on the RP5). With an HD texture pack holding it (ALBW 4K does) the HD image is used, as
  * on the game's own panel. Touches on the strips go nowhere (layout_to_screen). */
 void *albw_romfs_read(const char *path, size_t *size);   /* sdk/fs.c */
 
@@ -21,7 +23,7 @@ static const char *BW_VS =
 static const char *BW_FS =
     "#version 330 core\n"
     "in vec2 uv; out vec4 o; uniform sampler2D tex;\n"
-    "void main(){ o = vec4(texture(tex, uv).rgb * vec3(1.06, 0.87, 0.47), 1.0); }\n";   /* the panel's tint */
+    "void main(){ o = vec4(texture(tex, uv.yx).rgb * 1.07, 1.0); }\n";   /* stored rotated; the panel's brightness */
 
 /* a file of a SARC archive by the end of its name ("Wood_01.bflim"); NULL if missing */
 static const uint8_t *bw_sarc_find(const uint8_t *d, size_t n, const char *suffix, size_t *len) {
