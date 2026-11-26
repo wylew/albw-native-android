@@ -376,12 +376,7 @@ game's own wood: `Archive/Lyt_Game.arc` `Wood_01.bflim` (256 x 256 ETC1, the dar
 screen's right-hand panel), read from the ROM once (`sdk/fs.c` `albw_romfs_read`: a RomFS file by
 path), decoded with the renderer's decoder, turned 90 degrees (stored rotated: BFLIM swizzle 8; the
 grain then runs horizontally as on the panel), x1.07 brightness as the panel is drawn, 1 texel per
-3DS pixel. The game's own panel wood is drawn with the same screen-anchored mapping (`render.c`
-`WOOD_HASH`: the texture recognised at upload by its CityHash64, 9B9898D112BE3A17, the same bytes
-in every layout archive; on bottom-screen draws (240x320 viewport) in widescreen the layout shader
-`font.c` `u_wood` replaces its texture coordinates with the layout position / 256, wrap forced to
-repeat), so strips and panel are one sheet of wood with no seam in the grain; the game's UI is
-still drawn over it in its own order.
+3DS pixel; the right strip carries on from the panel.
 With an HD pack holding that texture (ALBW 4K does) the HD image is used, as on the game's panel.
 `layout.c`: the layout's rectangles are the whole frame (window sizes, presets, the custom editor);
 `layout_game_rect` / `layout_rect_ndc` / `layout_to_screen` work on the game's image, so touch
@@ -532,4 +527,4 @@ then commit.
 | 2026-11-25 | HUD overlay: X circle shown only once the game has opened the X button (its slot found on the bottom screen, 64 px above Y, measured on a later-game map page); hidden again on an earlier save |
 | 2026-11-25 | HUD overlay hides with the game's own HUD (power meter rim checked on the top screen): cutscenes and conversations |
 | 2026-11-25 | 16:9 bottom screen with the widescreen setting: 427-wide frame, the game's 320 image centred, side strips filled with the game's wood (Lyt_Game.arc Wood_01 from the ROM, or the HD pack's). PC: the RomFS reader finds Lyt_Game.arc / FlowChart.byaml at their sizes, a mock-up from an RP5 screenshot; not yet seen on the RP5 |
-| 2026-11-25 | 16:9 bottom screen: the game's panel wood screen-anchored (recognised by hash, layout shader u_wood) with the same mapping as the side strips: one continuous sheet of grain across the seams |
+| 2026-11-25 | Reverted the screen-anchored panel wood: on the RP5 it garbled the rupee digits and the top screen's button prompts (most likely the address-only match: other textures later at the wood's address, size / format not checked). Back to the side strips alone |

@@ -6,8 +6,7 @@
  * drawn at 1 texel per 3DS pixel. The image is stored rotated (the BFLIM's swizzle 8: the grain
  * runs along the stored columns), so it is sampled turned 90 degrees: the grain runs horizontally as
  * on the panel. The game draws it nearly untinted: x1.07 matches the panel (HD: strip ~71,38,9 x1.07
- * against the panel's ~76,41,9 on the RP5). The game's own panel wood is drawn screen-anchored with
- * the same mapping (render.c WOOD_HASH, font.c u_wood), so strips and panel are one sheet. With an HD texture pack holding it (ALBW 4K does) the HD image is used, as
+ * against the panel's ~76,41,9 on the RP5). With an HD texture pack holding it (ALBW 4K does) the HD image is used, as
  * on the game's own panel. Touches on the strips go nowhere (layout_to_screen). */
 void *albw_romfs_read(const char *path, size_t *size);   /* sdk/fs.c */
 
@@ -115,10 +114,8 @@ static void bw_fill(const Layout *l) {
     for (int side = 0; side < 2; side++) {
         float x = side ? g.x + g.w : r->x, w = side ? r->x + r->w - (g.x + g.w) : g.x - r->x;
         if (w <= 0) continue;
-        /* 1 texel per 3DS pixel, anchored to the game's image (x 0 at its left edge, y 0 at the
-         * bottom): the mapping render.c / font.c (u_wood) give the game's own panel wood, so the
-         * grain runs on across the seams */
-        float u0 = (x - g.x) / k / 256, uw = w / k / 256, vh = 240.0f / 256;
+        /* 1 texel per 3DS pixel; the right strip carries on from the panel's wood at 320 */
+        float u0 = side ? 64.0f / 256 : 128.0f / 256, uw = w / k / 256, vh = 240.0f / 256;
         float rect[4] = {x / l->ww * 2 - 1, 1 - (r->y + r->h) / l->wh * 2, w / l->ww * 2, r->h / l->wh * 2};
         float uvr[4] = {u0, 0, uw, vh};
         glUniform4fv(bw_loc_rect, 1, rect);

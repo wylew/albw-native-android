@@ -217,15 +217,6 @@ typedef struct {
 struct UniShadow_ { UniShadow u; };
 static UniShadow *g_ush;   /* RPROG_COUNT + RENDER_PROG_VARIANTS entries, allocated on first use */
 static float g_cur_fy = 1.0f;
-/* 16:9 bottom screen (platform/bottom_wide.c): the game's panel wood, Wood_01 (256 x 256 ETC1, the
- * same bytes in every layout archive, CityHash64 9B9898D112BE3A17), drawn on the bottom screen in
- * widescreen takes screen-anchored texture coordinates (font.c u_wood: the layout position in 3DS
- * pixels / 256, the mapping the side strips use), so the grain runs on across the strips' seams.
- * Separate statics, not fields of R / Program: save states restore static data by symbol. */
-#define WOOD_HASH 0x9B9898D112BE3A17ull
-static uintptr_t g_wood_addr[4];   /* where the wood texture was seen (texture uploads) */
-static int g_wood_draw;            /* the current draw samples it on the bottom screen in widescreen */
-static struct { GLuint prog; GLint loc; } g_wood_loc[16];
 static GLuint g_glprog_bound;   /* the program bound by the renderer (0 = unknown; use_program) */   /* stretch of the viewport last applied (apply_frag) */
 float albw_ws_factor(void) { return (float)g_ws_rows / 400.0f; }
 
@@ -1256,12 +1247,6 @@ static void tex_upload(TexEnt *t) {
             t->hd_pending = 1;
         }
     }
-    if (!t->cube && t->w == 256 && t->h == 256 && t->fmt == 12 &&
-        hdtex_cityhash64((const void *)t->addr, texfmt_size(12, 256, 256)) == WOOD_HASH) {
-        int k = 0;
-        while (k < 4 && g_wood_addr[k] && g_wood_addr[k] != t->addr) k++;
-        if (k < 4) g_wood_addr[k] = t->addr;
-    }
     t->dirty = false;
     R.st.tex_uploads++;
 }
@@ -1397,11 +1382,6 @@ static void bind_unit(int i) {
     if (t->p_maxl != eff - 1) { glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, eff - 1); t->p_maxl = eff - 1; }
     if (t->p_minl != minl) { rglTexParameterf(target, GL_TEXTURE_MIN_LOD, (float)minl); t->p_minl = minl; }
     sampler_params(target, u, &t->p_wrap_s, &t->p_wrap_t, &t->p_min, &t->p_mag, eff);
-    if (i == 0 && g_wood_draw) {   /* screen-anchored coordinates run past 0..1: repeat (resent next bind) */
-        glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        t->p_wrap_s = t->p_wrap_t = -1;
-    }
 }
 
 /* ================================================================== pipeline state */
@@ -2109,18 +2089,6 @@ static void upload_uniforms(Program *p) {
     if (no_shadow < 0) no_shadow = getenv("ALBW_NO_USHADOW") != NULL;
     if (no_shadow) S->sh_valid = 0;
     if (p->ws >= 0 && (!S->sh_valid || S->sh_ws != g_cur_fy)) { glUniform1f(p->ws, g_cur_fy); S->sh_ws = g_cur_fy; }
-    g_wood_draw = 0;
-    if (p->ws >= 0) {   /* the layout shader: u_wood (see WOOD_HASH) */
-        int k = 0;
-        while (k < 16 && g_wood_loc[k].prog && g_wood_loc[k].prog != p->prog) k++;
-        if (k < 16 && !g_wood_loc[k].prog) { g_wood_loc[k].prog = p->prog; g_wood_loc[k].loc = glGetUniformLocation(p->prog, "u_wood"); }
-        GLint loc = k < 16 ? g_wood_loc[k].loc : -1;
-        if (loc >= 0) {
-            if (g_ws_rows > 400 && (R.tex_enable & 1) && R.unit[0].addr && R.vp[2] == 240 && R.vp[3] == 320)
-                for (int i = 0; i < 4; i++) g_wood_draw |= g_wood_addr[i] == R.unit[0].addr;
-            glUniform1f(loc, (float)g_wood_draw);
-        }
-    }
     if (SH_CHANGED(sh_c, R.vsf)) { glUniform4fv(p->c, RENDER_VS_FLOATS, R.vsf); memcpy(S->sh_c, R.vsf, sizeof S->sh_c); }
     if (!S->sh_valid || S->sh_b != (GLint)R.vsb) { glUniform1i(p->b, R.vsb); S->sh_b = R.vsb; }
     {
