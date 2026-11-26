@@ -338,22 +338,27 @@ data layout) do not load.
 `platform/hud_overlay.c`, Esc menu Debug > HUD overlay (`hud_overlay` in layout.cfg, **default off**,
 work in progress): while the bottom screen is hidden, its item buttons are drawn on the main screen
 at the top screen's scale, stacked on the left just above the power meter and centred on it (also
-in widescreen, where the game moves its HUD right by half the extra width) (the bottom right stays
+in widescreen, where the game moves its HUD right by half the extra width; the bottom right stays
 free for the game's button prompts): each the item's icon in a small circle (28 px of the 240-line
-screen, the icon at ~0.6 of its bottom-screen size) with a light ring, the button's badge at its
-upper left as on the bottom screen. Y sits lowest; X goes above it once something is mapped to X
-(`HUD_X_ON`, its regions are in place). Not shown: the rupee counter and the B button (the sword).
-- Copied from the bottom screen's image (the game draws it every frame), positions from the game's
-  layouts (`Lyt_Game.arc`: `Gm_MainSystemItemB` places the slot part `Gm_SelectItemRootBtn` for Y
-  at (129, -21) and X at (129, 43); in the part the 32 x 32 item at (0, 3), the badge at
-  (-24, 27)). The page is checked every 10 frames from a few pixels (as `selector.c`); the regions
-  are copied into a cache texture only on the map page, so other pages (Items, Gear, dungeon map,
-  warp menu) keep the last good copy.
+screen, the icon at ~0.6 of its bottom-screen size) with a light tan ring, the button's badge at its
+upper left. Y sits lowest; X goes above it once something is mapped to X (`HUD_X_ON`, its regions
+are in place). Not shown: the rupee counter and the B button (the sword).
+- The item icon is copied from the bottom screen's image (the game draws it every frame, also when
+  hidden); position from the game's layouts (`Lyt_Game.arc`: `Gm_MainSystemItemB` places the slot
+  part `Gm_SelectItemRootBtn` for Y at (129, -21), X at (129, 43); in the part the 32 x 32 item at
+  (0, 3)). The Y slot is in the same place on the world map and the dungeon map, so the slot itself
+  is checked every 10 frames (its dark round button ~45,28,10 and the wood around it ~79,44,8, six
+  pixels that must hold still since the last check, so nothing is copied mid-fade); elsewhere the
+  last good copy stays. `ALBW_HUD_LOG=1` logs when the slot appears / goes.
+- The badges never change, so the shader draws them: a brown disc with the letter (Y, X) in the
+  ring's light tan (more readable on the wood than the game's dark letter; the dungeon map does not
+  show the Y badge at all).
 - Fades with the scene: each frame the top screen is shrunk to 8 x 8 samples on the GPU (a blit,
   no read back) and the shader counts the ones that are not black; loading screens (black but for
   the Triforce icon) and the game's fades to black hide the overlay, dark rooms keep it.
-- Checked on the RP5 (Eastern Palace entrance): the bow centred in its circle, the Y badge at its
-  upper left, the lower right clear.
+- Checked on the RP5 (Eastern Palace, inside and out): the icon from the first moments after a
+  state load without showing the bottom screen, centred on the meter (1 px off at 1080p), hidden
+  on the loading screen.
 
 ### Cheats
 
@@ -496,3 +501,4 @@ then commit.
 | 2026-11-25 | HUD overlay redesign: no sword; the Y item as its icon in a small ringed circle with the Y badge at its upper left, stacked on the left above the power meter (X slot reserved above it); positions from the game's layouts. Shaders checked with glslangValidator (GLSL ES 3.00); not yet seen on the RP5 |
 | 2026-11-25 | HUD overlay: rupee counter removed; the overlay fades out on loading screens and fades to black (8 x 8 top-screen samples counted in the shader). RP5: the new item circle checked in the Eastern Palace |
 | 2026-11-25 | HUD overlay: the item circle centred on the power meter, widescreen included (meter measured at 20 px of 400, 33.7 of 427) |
+| 2026-11-25 | HUD overlay: the Y slot itself is checked (works on the dungeon map, no copies during fades); badges drawn by the shader in the ring's light tan instead of copied. RP5: icon and badge right after a state load in the Eastern Palace |

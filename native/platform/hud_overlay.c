@@ -3,18 +3,23 @@
  * screen). Debug > HUD overlay, layout.cfg hud_overlay (default off: work in progress).
  *
  * Pixels, not game data: the regions are copied from the bottom screen's image (screens[
- * SCREEN_BOTTOM], drawn by the game every frame even when not shown). They are only where the
- * code expects them on the world map page, so the page is checked every 10 frames from a few
- * pixels (the orange map scroll top left; not Gear / Items / a dungeon map: as selector.c), and
- * the regions are copied (glBlitFramebuffer) into a small cache texture only then; on other pages
- * the cache keeps the last good copy. Nothing is drawn until the first copy.
+ * SCREEN_BOTTOM], drawn by the game every frame even when not shown). The Y slot sits in the same
+ * place on every page that shows it (world map, dungeon map), so the slot itself is checked every
+ * 10 frames from six pixels (hud_check_slot: its dark round button and the wood around it, held
+ * still), and the item regions are copied (glBlitFramebuffer) into a small cache texture only while
+ * it is there; elsewhere (loading, fades, menus) the cache keeps the last good copy. Nothing is
+ * drawn until the first copy. ALBW_HUD_LOG=1 logs when the slot appears / goes.
+ * The button badges never change, so they are drawn by the shader (no copy): the game's look, a
+ * brown disc (~103, 69, 21) with the letter in the ring's light tan (reads better than the game's dark
+ * letter over the wood); the dungeon map does
+ * not even show the Y badge.
  *
  * Regions in 3DS bottom-screen pixels (320 x 240, origin top left), from the game's layouts
  * (Lyt_Game.arc: Gm_MainSystemItemB places the Y slot part Gm_SelectItemRootBtn at layout (129, -21),
  * the X slot at (129, 43); in the part the item (32 x 32) sits at (0, 3), the button badge (16 x 16)
  * at (-24, 27); screen = (160 + x, 120 - y)):
- *   Y item: 36 x 36 around the icon's centre (289, 138); Y badge (257, 106, 16 x 16)
- *   X item: 36 x 36 around (289, 74); X badge (257, 42, 16 x 16) (not drawn yet: HUD_X_ON)
+ *   Y item: 36 x 36 around the icon's centre (289, 138)
+ *   X item: 36 x 36 around (289, 74) (not drawn yet: HUD_X_ON)
  * Not shown: the rupee counter and the B button (the sword).
  *
  * Drawn at the top screen's scale (k = its rect height / 240), in top-screen pixels, stacked on the
@@ -29,10 +34,10 @@
  * no read back) and the shader counts the samples that are not black; with few of them (a loading
  * screen: black but for the Triforce icon; the game's fades to black) the overlay fades out. */
 typedef struct { int x, y, w, h; } HudRect;
-enum { HUD_Y_ITEM, HUD_Y_BADGE, HUD_X_ITEM, HUD_X_BADGE, HUD_N };
-static const HudRect HUD_SRC[HUD_N] = {{271, 120, 36, 36}, {257, 106, 16, 16}, {271, 56, 36, 36}, {257, 42, 16, 16}};
-static const int HUD_ATLAS_X[HUD_N] = {0, 36, 52, 88};
-#define HUD_ATLAS_W (36 + 16 + 36 + 16)
+enum { HUD_Y_ITEM, HUD_X_ITEM, HUD_N };
+static const HudRect HUD_SRC[HUD_N] = {{271, 120, 36, 36}, {271, 56, 36, 36}};
+static const int HUD_ATLAS_X[HUD_N] = {0, 36};
+#define HUD_ATLAS_W (36 + 36)
 #define HUD_ATLAS_H 36
 #define HUD_X_ON 0              /* the X button's item: when something is mapped to X */
 #define HUD_ITEM_D 28.0f        /* item circle diameter, ring included (top-screen pixels) */
@@ -44,11 +49,11 @@ static const int HUD_ATLAS_X[HUD_N] = {0, 36, 52, 88};
 #define HUD_LUM_N 8             /* top screen samples per side for the fade */
 
 static GLuint hud_prog, hud_tex, hud_fbo, hud_lum_tex, hud_lum_fbo;
-static GLint hud_loc_rect, hud_loc_uvr, hud_loc_ring, hud_loc_mode;
-static int hud_scale_built, hud_have, hud_page_map;
+static GLint hud_loc_rect, hud_loc_uvr, hud_loc_ring, hud_loc_mode, hud_loc_letter;
+static int hud_scale_built, hud_have, hud_slot_seen;
 
 /* mode 1: item circle: the texture inside, from `ring` of the radius a light ring with dark rims;
- * mode 2: badge: the texture in a circle. Both times the scene fade: samples (of 64) with any
+ * mode 2: badge: a brown disc with `letter` (0 Y, 1 X) in light tan strokes. Both times the scene fade: samples (of 64) with any
  * channel above 3 % : fully shown from 10, gone at 3 or fewer. */
 static const char *HUD_VS =
     "#version 330 core\n"
@@ -58,7 +63,9 @@ static const char *HUD_VS =
 static const char *HUD_FS =
     "#version 330 core\n"
     "in vec2 uv; in vec2 lp; uniform sampler2D tex; uniform sampler2D lum; uniform float ring; uniform int mode;\n"
-    "out vec4 o;\n"
+    "uniform int letter; out vec4 o;\n"
+    "float seg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a;\n"
+    "  return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)); }\n"
     "void main(){\n"
     "  float lit = 0.0;\n"
     "  for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) {\n"
@@ -71,6 +78,17 @@ static const char *HUD_FS =
     "    float in_ring = smoothstep(ring - aa, ring, d);\n"
     "    float rim = max(smoothstep(0.94 - aa, 0.94, d), 1.0 - smoothstep(ring + 0.03, ring + 0.03 + aa, d));\n"
     "    c = mix(c, mix(vec3(0.96, 0.92, 0.78), vec3(0.18, 0.12, 0.06), rim), in_ring);\n"
+    "  }\n"
+    "  if (mode == 2) {   /* q: -1..1, y down */\n"
+    "    vec2 q = vec2(lp.x - 0.5, 0.5 - lp.y) * 2.0;\n"
+    "    vec3 base = vec3(0.40, 0.27, 0.08);\n"
+    "    c = mix(base * 1.12, base * 0.78, d * d);\n"
+    "    float s = letter == 0\n"
+    "      ? min(min(seg(q, vec2(-0.40, -0.50), vec2(0.0, 0.02)), seg(q, vec2(0.40, -0.50), vec2(0.0, 0.02))),\n"
+    "            seg(q, vec2(0.0, 0.02), vec2(0.0, 0.55)))\n"
+    "      : min(seg(q, vec2(-0.40, -0.45), vec2(0.40, 0.45)), seg(q, vec2(0.40, -0.45), vec2(-0.40, 0.45)));\n"
+    "    float qa = max(fwidth(q.x), 1e-4);\n"
+    "    c = mix(c, vec3(0.96, 0.92, 0.78), 1.0 - smoothstep(0.15 - qa, 0.15 + qa, s));   /* the ring's light tan */\n"
     "  }\n"
     "  o = vec4(c, a * show); }\n";
 
@@ -98,6 +116,7 @@ static int hud_init(int sc) {
         hud_loc_uvr = glGetUniformLocation(hud_prog, "uvr");
         hud_loc_ring = glGetUniformLocation(hud_prog, "ring");
         hud_loc_mode = glGetUniformLocation(hud_prog, "mode");
+        hud_loc_letter = glGetUniformLocation(hud_prog, "letter");
         glUseProgram(hud_prog);
         glUniform1i(glGetUniformLocation(hud_prog, "tex"), 0);
         glUniform1i(glGetUniformLocation(hud_prog, "lum"), 1);
@@ -110,23 +129,46 @@ static int hud_init(int sc) {
     return ok;
 }
 
-/* the world map page: orange scroll top left, not Gear (red at 300,60) / Items (tan at 160,120) */
-static void hud_check_page(const Target *bt) {
+/* the Y slot on the bottom screen: the item icon (32 x 32 around (289, 138)) on a dark round button
+ * (~45, 28, 10, radius ~22) on the lighter wood of the right-hand panel (~79, 44, 8), on the world
+ * map and the dungeon map alike (the Y badge is not: the dungeon map hides it and frames the slot).
+ * Four points on the button 20 px from the centre (outside any icon), two on the wood around it.
+ * Copied only when all six held still since the last check: the game fades the bottom screen on
+ * door transitions, and a copy taken then shows a dark icon until the next one. */
+static const int16_t HUD_SLOT_PT[6][2] = {{289, 158}, {269, 138}, {309, 138}, {289, 118}, {316, 138}, {289, 90}};
+static int hud_brownish(const uint8_t *p) { return p[0] > p[1] + 6 && p[1] > p[2] + 4 && p[2] < 30; }
+static void hud_check_slot(const Target *bt) {
     int w = bt->w, h = bt->h;
-    uint8_t a[4] = {0}, b[4] = {0}, d[4] = {0};
+    uint8_t px[6][4] = {{0}};
     glBindFramebuffer(0x8CA8 /* GL_READ_FRAMEBUFFER */, bt->fbo);
-    glReadPixels(300 * w / 320, h - 1 - 60 * h / 240, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, a);
-    glReadPixels(160 * w / 320, h - 1 - 120 * h / 240, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, b);
-    glReadPixels(5 * w / 320, h - 1 - 5 * h / 240, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, d);
+    for (int i = 0; i < 6; i++)
+        glReadPixels((HUD_SLOT_PT[i][0] * w + w / 2) / 320, h - 1 - (HUD_SLOT_PT[i][1] * h + h / 2) / 240, 1, 1, GL_RGBA,
+                     GL_UNSIGNED_BYTE, px[i]);
     glBindFramebuffer(0x8CA8, 0);
-    int gear = a[0] > 90 && a[1] < 45, items = b[0] > 150 && b[1] > 120 && b[2] < 120;
-    int scroll = d[0] > 200 && d[1] > 140 && d[2] < 110;
-    hud_page_map = scroll && !gear && !items;
+    static uint8_t prev[6][4];
+    int still = 1, button = 1, wood = 1, br = 0;
+    for (int i = 0; i < 6; i++)
+        for (int c = 0; c < 3; c++)
+            if (px[i][c] > prev[i][c] + 3 || prev[i][c] > px[i][c] + 3) still = 0;
+    memcpy(prev, px, sizeof prev);
+    for (int i = 0; i < 4; i++) {
+        button &= px[i][0] >= 28 && px[i][0] <= 75 && px[i][1] >= 14 && px[i][1] <= 50 && hud_brownish(px[i]);
+        br += px[i][0];
+    }
+    for (int i = 4; i < 6; i++) wood &= hud_brownish(px[i]) && px[i][0] >= br / 4 + 18;
+    int seen = button && wood && still;
+    static int lg = -1;
+    if (lg < 0) lg = getenv("ALBW_HUD_LOG") != NULL;
+    if (lg && seen != hud_slot_seen)
+        fprintf(stderr, "hud: Y slot %s (button %d,%d,%d wood %d,%d,%d%s%s%s)\n", seen ? "seen: copying" : "gone: keeping the last copy",
+                px[0][0], px[0][1], px[0][2], px[4][0], px[4][1], px[4][2], button ? "" : ", no button", wood ? "" : ", no wood",
+                still ? "" : ", changing");
+    hud_slot_seen = seen;
 }
 
 /* one atlas region at window pixels (x, y, w, h); the region fills the middle `fill` of the quad
  * (mode 1: the ring outside it covers what is sampled beyond the region) */
-static void hud_draw(const Layout *l, int i, float x, float y, float w, float h, int mode, float fill) {
+static void hud_draw(const Layout *l, int i, float x, float y, float w, float h, int mode, float fill, int letter) {
     const HudRect *s = &HUD_SRC[i];
     float rect[4] = {x / l->ww * 2 - 1, 1 - (y + h) / l->wh * 2, w / l->ww * 2, h / l->wh * 2};
     float uw = (float)s->w / HUD_ATLAS_W / fill, uh = (float)s->h / HUD_ATLAS_H / fill;
@@ -135,6 +177,7 @@ static void hud_draw(const Layout *l, int i, float x, float y, float w, float h,
     glUniform4fv(hud_loc_uvr, 1, uvr);
     glUniform1f(hud_loc_ring, HUD_RING);
     glUniform1i(hud_loc_mode, mode);
+    glUniform1i(hud_loc_letter, letter);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
@@ -146,8 +189,8 @@ static void hud_composite(const Layout *l) {
     if (sc < 1) sc = 1;
     if (!hud_init(sc)) return;
     static unsigned frame;
-    if (frame++ % 10 == 0) hud_check_page(bt);
-    if (hud_page_map) {   /* refresh the cache from the bottom screen (GL rows are bottom first) */
+    if (frame++ % 10 == 0) hud_check_slot(bt);
+    if (hud_slot_seen) {   /* refresh the cache from the bottom screen (GL rows are bottom first) */
         glBindFramebuffer(0x8CA8 /* READ */, bt->fbo);
         glBindFramebuffer(0x8CA9 /* DRAW */, hud_fbo);
         for (int i = 0; i < HUD_N; i++) {
@@ -185,10 +228,10 @@ static void hud_composite(const Layout *l) {
     for (int b = 0; b < 2; b++) {
         int item = b == 0 ? HUD_Y_ITEM : HUD_X_ITEM;
         if (b == 1 && !HUD_X_ON) break;
-        hud_draw(l, item, cx - d / 2, cy - d / 2, d, d, 1, HUD_RING);
+        hud_draw(l, item, cx - d / 2, cy - d / 2, d, d, 1, HUD_RING, 0);
         /* the badge at the upper left, its centre on the ring's 45-degree line just outside */
         float bx = cx - 0.47f * d, by = cy - 0.47f * d;
-        hud_draw(l, item + 1, bx - bd / 2, by - bd / 2, bd, bd, 2, 1);
+        hud_draw(l, item, bx - bd / 2, by - bd / 2, bd, bd, 2, 1, b);   /* letter 0 Y, 1 X */
         cy -= (HUD_ITEM_D + HUD_STACK_GAP) * k;
     }
     glDisable(GL_BLEND);
