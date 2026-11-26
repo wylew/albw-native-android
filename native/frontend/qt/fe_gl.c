@@ -144,7 +144,7 @@ static void targets_create(int scale) {
     target_free(&screens[0]);
     target_free(&screens[1]);
     target_init(&screens[0], LAYOUT_TOP_W * scale, LAYOUT_SCREEN_H * scale);
-    target_init(&screens[1], LAYOUT_BOTTOM_W * scale, LAYOUT_SCREEN_H * scale);
+    target_init(&screens[1], LAYOUT_BOTTOM_GAME_W * scale, LAYOUT_SCREEN_H * scale);
     g_scale = scale;
 }
 

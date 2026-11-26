@@ -321,6 +321,56 @@ int albw_list_subdirs(const char *dir, char (*names)[64], int max) {
     return list_n;
 }
 
+/* A RomFS file by path ("Archive/Lyt_Game.arc"), read whole into a malloc'd buffer (*size bytes),
+ * NULL if missing. For the port's own use (platform/bottom_wide.c: the wood of the 16:9 bottom
+ * screen), not the game's file service. Walks the level-3 directory / file metadata: entries
+ * {parent, sibling, child dir (dirs) | data offset u64 + size u64 (files), first file (dirs),
+ * hash next, name length, UTF-16 name}, 0xFFFFFFFF = none. */
+void *albw_romfs_read(const char *path, size_t *size) {
+    void *out = NULL;
+    pthread_mutex_lock(&fs_lock);
+    rom_open_locked();
+    uint8_t h[0x28];
+    uint8_t *dm = NULL, *fm = NULL;
+    if (read_exact(rom.fd, h, sizeof h, rom.romfs_l3_off) != 0) goto done;
+    uint32_t dmo = rd32(h + 0x0C), dms = rd32(h + 0x10), fmo = rd32(h + 0x1C), fms = rd32(h + 0x20), fdo = rd32(h + 0x24);
+    dm = malloc(dms);
+    fm = malloc(fms);
+    if (!dm || !fm || read_exact(rom.fd, dm, dms, rom.romfs_l3_off + dmo) != 0 ||
+        read_exact(rom.fd, fm, fms, rom.romfs_l3_off + fmo) != 0)
+        goto done;
+    uint32_t dir = 0;   /* the root */
+    const char *p = path;
+    for (;;) {
+        const char *e = strchr(p, '/');
+        size_t n = e ? (size_t)(e - p) : strlen(p);
+        int is_dir = e != NULL;
+        uint32_t o = rd32(dm + dir + (is_dir ? 8 : 12));   /* first child directory / first file */
+        while (o != 0xFFFFFFFFu) {
+            const uint8_t *ent = is_dir ? dm + o : fm + o;
+            uint32_t nl = rd32(ent + (is_dir ? 20 : 28));
+            const uint8_t *nm = ent + (is_dir ? 24 : 32);
+            int same = nl == n * 2;
+            for (size_t i = 0; same && i < n; i++) same = nm[2 * i] == (uint8_t)p[i] && nm[2 * i + 1] == 0;
+            if (same) break;
+            o = rd32(ent + 4);   /* sibling */
+        }
+        if (o == 0xFFFFFFFFu || (is_dir ? o + 24 > dms : o + 32 > fms)) goto done;
+        if (is_dir) { dir = o; p = e + 1; continue; }
+        uint64_t off = rd64(fm + o + 8), sz = rd64(fm + o + 16);
+        if (sz > ((uint64_t)64 << 20) || off + sz > rom.romfs_l3_size) goto done;
+        out = malloc(sz ? (size_t)sz : 1);
+        if (out && read_exact(rom.fd, out, (size_t)sz, rom.romfs_l3_off + fdo + off) != 0) { free(out); out = NULL; }
+        if (out) *size = (size_t)sz;
+        break;
+    }
+done:
+    free(dm);
+    free(fm);
+    pthread_mutex_unlock(&fs_lock);
+    return out;
+}
+
 /* The save folder in use (Esc > File > Save set reads and writes the game's save files here). */
 const char *albw_save_root(void) {
     pthread_mutex_lock(&fs_lock);

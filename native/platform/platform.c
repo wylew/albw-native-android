@@ -8,6 +8,7 @@ __attribute__((weak)) void albw_sched_block_end(void) {}
  * (native/runtime/prof.c), which builds without them (asset viewer, render tests) lack */
 #include "../render/render.h"
 #include "../render/hdtex.h"
+#include "../render/texdecode.h"
 __attribute__((weak)) int render_ready(void) { return 0; }
 __attribute__((weak)) int render_get_scale(void) { return 1; }
 __attribute__((weak)) void render_set_scale(int scale) { (void)scale; }
@@ -482,7 +483,11 @@ int plat_init(const char *title, const PlatConfig *c) {
     }
     if (g_layout_cfg.single_screen) g_separate = 0;   /* single-screen mode: one window (saved choice kept) */
     if (g_gamescope) g_separate = 0;
-    if (g_layout_cfg.widescreen) { layout_set_top_w(LAYOUT_WIDE_TOP_W); render_set_widescreen(LAYOUT_WIDE_TOP_W); }
+    if (g_layout_cfg.widescreen) {
+        layout_set_top_w(LAYOUT_WIDE_TOP_W);
+        layout_set_bottom_w(LAYOUT_WIDE_BOTTOM_W);
+        render_set_widescreen(LAYOUT_WIDE_TOP_W);
+    }
     if (g_layout_cfg.preset != LAYOUT_TOP_ONLY && g_layout_cfg.preset != LAYOUT_BOTTOM_ONLY)
         g_last_two_preset = g_layout_cfg.preset;
     g_joined_w = TOP_W * cfg.scale;
@@ -585,7 +590,7 @@ static void plat_separate_size(int s, int *w, int *h) {
         *w = g->w;
         *h = g->h;
     } else {
-        *w = (s == SCREEN_TOP ? TOP_W : BOTTOM_W) * cfg.scale;
+        *w = (s == SCREEN_TOP ? TOP_W : LAYOUT_BOTTOM_W) * cfg.scale;   /* the frame: 427 in widescreen */
         *h = SCREEN_H * cfg.scale;
     }
 }
@@ -906,9 +911,10 @@ void plat_frame_end_hook(void) {
 }
 static void plat_widescreen_apply(int on) {
     g_layout_cfg.widescreen = on != 0;
-    int old_w = TOP_W;
+    int old_w = TOP_W, old_bw = LAYOUT_BOTTOM_W;
     int w = on ? LAYOUT_WIDE_TOP_W : 400;
     layout_set_top_w(w);
+    layout_set_bottom_w(on ? LAYOUT_WIDE_BOTTOM_W : LAYOUT_BOTTOM_GAME_W);   /* the game still draws 320 */
     render_set_widescreen(w);
     Target *t = &screens[SCREEN_TOP];
     glDeleteFramebuffers(1, &t->fbo);
@@ -931,8 +937,16 @@ static void plat_widescreen_apply(int on) {
             plat_set_size_restored(tw, g_joined_w, g_joined_h);
         }
     }
+    if (g_separate && win_bottom && !(SDL_GetWindowFlags(win_bottom) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN))) {
+        /* the bottom screen's own window: widened / narrowed with its frame */
+        LayoutWindowGeom *gb = &g_layout_cfg.window[SCREEN_BOTTOM];
+        int bw, bh;
+        if (gb->has_size) gb->w = (int)((long)gb->w * LAYOUT_BOTTOM_W / old_bw);
+        plat_separate_size(SCREEN_BOTTOM, &bw, &bh);
+        plat_set_size_restored(win_bottom, bw, bh);
+    }
     plat_layout_changed();
-    fprintf(stderr, "layout: widescreen %s (top screen %dx240)\n", on ? "on" : "off", w);
+    fprintf(stderr, "layout: widescreen %s (top screen %dx240, bottom frame %dx240)\n", on ? "on" : "off", w, LAYOUT_BOTTOM_W);
 }
 /* Esc > File > Reset game: like the console's reset, the game starts over from the boot (what was
  * not saved in game is lost; save files and save states stay). Two presses within 3 s. The
@@ -1459,6 +1473,7 @@ static uint32_t route_step(int *pad_x, int *pad_y) {
 
 #include "selector.c"   /* single-screen bottom-screen selector (D-pad + A) */
 #include "hud_overlay.c"   /* item buttons on the main screen (single screen) */
+#include "bottom_wide.c"   /* widescreen: wood strips at the bottom screen's sides */
 #include "cheats.c"   /* Esc menu > Cheats: value cheats on Link's status block */
 
 int plat_poll(void) {
@@ -1673,6 +1688,7 @@ static void plat_composite(const Layout *l) {
     for (int k = 0; k < 2; k++) {
         int i = l->order[k];
         if (!l->visible[i]) continue;
+        if (i == SCREEN_BOTTOM) bw_fill(l);   /* widescreen: the side strips (bottom_wide.c) */
         float rect[4];
         layout_rect_ndc(l, i, rect);
         glActiveTexture(GL_TEXTURE0);

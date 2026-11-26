@@ -32,7 +32,8 @@
  *   hud_overlay 0             bottom-screen Y item button on the main screen (single screen)
  *   snap 1                    custom editor: snap to window edges/centre, the other screen, integer sizes
  *   custom_front bottom       screen drawn last (on top) where custom rectangles overlap
- *   widescreen 0              1 = 16:9 top screen: the game draws a wider view (F10)
+ *   widescreen 0              1 = 16:9: the game draws a wider top view, the bottom screen gets wood
+ *                             strips at its sides (F10)
  *   single_screen 0           1 = show one screen: the top one, and the bottom one in its place while
  *                             the SCREEN binding (Tab / right-stick click) has it toggled up
  *   custom top 0.00000 0.00000 1.00000 0.50000 1      x y w h (normalized to the window) visible
@@ -47,7 +48,15 @@ extern "C" {
 int layout_top_w(void);
 void layout_set_top_w(int w);
 #define LAYOUT_WIDE_TOP_W 427   /* 16:9 at 240 rows */
-#define LAYOUT_BOTTOM_W 320
+/* The bottom screen's frame: 320, or 427 in widescreen; the game's image stays 320 wide, centred
+ * in it, the side strips filled by the frontend (platform/bottom_wide.c: the game's wood).
+ * layout_rect_ndc and layout_to_screen work on the image (layout_game_rect), the layout's
+ * rectangles (r[]) are the whole frame. */
+#define LAYOUT_BOTTOM_W (layout_bottom_w())
+int layout_bottom_w(void);
+void layout_set_bottom_w(int w);
+#define LAYOUT_BOTTOM_GAME_W 320
+#define LAYOUT_WIDE_BOTTOM_W 427   /* 16:9 at 240 rows */
 #define LAYOUT_SCREEN_H 240
 #define LAYOUT_SCREEN_TOP 0
 #define LAYOUT_SCREEN_BOTTOM 1
@@ -121,10 +130,14 @@ void layout_native_size(int screen, int *w, int *h);
 
 /* Topmost visible screen under window pixel (x, y), or -1. */
 int layout_hit(const Layout *l, float x, float y);
+/* Where the game's image of `screen` lies inside its rectangle: the whole of it, except the bottom
+ * screen in widescreen (320 of the 427 columns, centred). */
+void layout_game_rect(const Layout *l, int screen, LayoutRect *out);
 /* Window pixel -> native screen pixel of `screen` (0..399 / 0..319, 0..239), clamped to the screen.
- * Returns 1 if the point is inside the drawn screen. */
+ * Returns 1 if the point is inside the game's image (the bottom screen's side strips: 0). */
 int layout_to_screen(const Layout *l, int screen, float x, float y, int *sx, int *sy);
-/* Pixel rect -> OpenGL NDC rect (x, y, w, h; bottom-left origin) for a full-window viewport. */
+/* The game's image (layout_game_rect) -> OpenGL NDC rect (x, y, w, h; bottom-left origin) for a
+ * full-window viewport. */
 void layout_rect_ndc(const Layout *l, int screen, float ndc[4]);
 
 /* Turn the current layout into the custom one (preset = custom, rects copied). */

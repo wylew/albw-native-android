@@ -36,6 +36,7 @@ typedef void GLvoid;
 #define GL_NEAREST 0x2600
 #define GL_LINEAR 0x2601
 #define GL_CLAMP_TO_EDGE 0x812F
+#define GL_REPEAT 0x2901
 #define GL_TEXTURE0 0x84C0
 #define GL_ARRAY_BUFFER 0x8892
 #define GL_ELEMENT_ARRAY_BUFFER 0x8893

@@ -24,6 +24,19 @@ static int g_top_w = 400;
 int layout_top_w(void) { return g_top_w; }
 void layout_set_top_w(int w) { g_top_w = w < 400 ? 400 : w; }
 
+static int g_bottom_w = LAYOUT_BOTTOM_GAME_W;
+int layout_bottom_w(void) { return g_bottom_w; }
+void layout_set_bottom_w(int w) { g_bottom_w = w < LAYOUT_BOTTOM_GAME_W ? LAYOUT_BOTTOM_GAME_W : w; }
+
+void layout_game_rect(const Layout *l, int screen, LayoutRect *out) {
+    *out = l->r[screen];
+    if (screen == LAYOUT_SCREEN_BOTTOM && LAYOUT_BOTTOM_W > LAYOUT_BOTTOM_GAME_W) {
+        float w = out->w * LAYOUT_BOTTOM_GAME_W / LAYOUT_BOTTOM_W;
+        out->x += (out->w - w) * 0.5f;
+        out->w = w;
+    }
+}
+
 void layout_native_size(int screen, int *w, int *h) {
     *w = screen == LAYOUT_SCREEN_TOP ? LAYOUT_TOP_W : LAYOUT_BOTTOM_W;
     *h = LAYOUT_SCREEN_H;
@@ -226,7 +239,10 @@ int layout_hit(const Layout *l, float x, float y) {
 int layout_to_screen(const Layout *l, int screen, float x, float y, int *sx, int *sy) {
     int nw, nh;
     layout_native_size(screen, &nw, &nh);
-    const LayoutRect *r = &l->r[screen];
+    if (screen == LAYOUT_SCREEN_BOTTOM) nw = LAYOUT_BOTTOM_GAME_W;   /* the game's image, not the frame */
+    LayoutRect gr;
+    layout_game_rect(l, screen, &gr);
+    const LayoutRect *r = &gr;
     if (!l->visible[screen] || r->w <= 0 || r->h <= 0) {
         *sx = *sy = 0;
         return 0;
@@ -239,7 +255,9 @@ int layout_to_screen(const Layout *l, int screen, float x, float y, int *sx, int
 }
 
 void layout_rect_ndc(const Layout *l, int s, float ndc[4]) {
-    const LayoutRect *r = &l->r[s];
+    LayoutRect gr;
+    layout_game_rect(l, s, &gr);
+    const LayoutRect *r = &gr;
     ndc[0] = r->x / l->ww * 2 - 1;
     ndc[1] = 1 - (r->y + r->h) / l->wh * 2;
     ndc[2] = r->w / l->ww * 2;

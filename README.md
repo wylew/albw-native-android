@@ -367,6 +367,20 @@ save from before the unlock). Not shown: the rupee counter and the B button (the
   state load without showing the bottom screen, centred on the meter (1 px off at 1080p), hidden
   on the loading screen.
 
+### 16:9 bottom screen
+
+`platform/bottom_wide.c`, with the widescreen setting (F10, Esc menu, `widescreen` in layout.cfg):
+the bottom screen's frame becomes 427 x 240 (16:9) like the top screen, but the game keeps drawing
+its 320 x 240 image, centred; nothing is reflowed. The two side strips (~53 columns each) show the
+game's own wood: `Archive/Lyt_Game.arc` `Wood_01.bflim` (256 x 256 ETC1, the dark wood of the bottom
+screen's right-hand panel), read from the ROM once (`sdk/fs.c` `albw_romfs_read`: a RomFS file by
+path), decoded with the renderer's decoder, tinted as the game draws the panel (texture mean
+~71,47,19, panel ~75,41,9) at 1 texel per 3DS pixel; the right strip carries on from the panel.
+With an HD pack holding that texture (ALBW 4K does) the HD image is used, as on the game's panel.
+`layout.c`: the layout's rectangles are the whole frame (window sizes, presets, the custom editor);
+`layout_game_rect` / `layout_rect_ndc` / `layout_to_screen` work on the game's image, so touch
+coordinates stay 0..319 and touches on the strips go nowhere.
+
 ### Cheats
 
 `platform/cheats.c`, Esc menu > **Cheats** (session only: every start has them off). Value cheats
@@ -511,3 +525,4 @@ then commit.
 | 2026-11-25 | HUD overlay: the Y slot itself is checked (works on the dungeon map, no copies during fades); badges drawn by the shader in the ring's light tan instead of copied. RP5: icon and badge right after a state load in the Eastern Palace |
 | 2026-11-25 | HUD overlay: X circle shown only once the game has opened the X button (its slot found on the bottom screen, 64 px above Y, measured on a later-game map page); hidden again on an earlier save |
 | 2026-11-25 | HUD overlay hides with the game's own HUD (power meter rim checked on the top screen): cutscenes and conversations |
+| 2026-11-25 | 16:9 bottom screen with the widescreen setting: 427-wide frame, the game's 320 image centred, side strips filled with the game's wood (Lyt_Game.arc Wood_01 from the ROM, or the HD pack's). PC: the RomFS reader finds Lyt_Game.arc / FlowChart.byaml at their sizes, a mock-up from an RP5 screenshot; not yet seen on the RP5 |
