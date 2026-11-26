@@ -341,8 +341,10 @@ at the top screen's scale, stacked on the left just above the power meter and ce
 in widescreen, where the game moves its HUD right by half the extra width; the bottom right stays
 free for the game's button prompts): each the item's icon in a small circle (28 px of the 240-line
 screen, the icon at ~0.6 of its bottom-screen size) with a light tan ring, the button's badge at its
-upper left. Y sits lowest; X goes above it once something is mapped to X (`HUD_X_ON`, its regions
-are in place). Not shown: the rupee counter and the B button (the sword).
+upper left. Y sits lowest; X goes above it only once the game has opened the X button (later in
+the story; until then its place above Y on the bottom screen is plain wood, so the overlay checks
+that place whenever the Y slot reads cleanly: a slot button there shows X, wood hides it, also for a
+save from before the unlock). Not shown: the rupee counter and the B button (the sword).
 - The item icon is copied from the bottom screen's image (the game draws it every frame, also when
   hidden); position from the game's layouts (`Lyt_Game.arc`: `Gm_MainSystemItemB` places the slot
   part `Gm_SelectItemRootBtn` for Y at (129, -21), X at (129, 43); in the part the 32 x 32 item at
@@ -502,3 +504,4 @@ then commit.
 | 2026-11-25 | HUD overlay: rupee counter removed; the overlay fades out on loading screens and fades to black (8 x 8 top-screen samples counted in the shader). RP5: the new item circle checked in the Eastern Palace |
 | 2026-11-25 | HUD overlay: the item circle centred on the power meter, widescreen included (meter measured at 20 px of 400, 33.7 of 427) |
 | 2026-11-25 | HUD overlay: the Y slot itself is checked (works on the dungeon map, no copies during fades); badges drawn by the shader in the ring's light tan instead of copied. RP5: icon and badge right after a state load in the Eastern Palace |
+| 2026-11-25 | HUD overlay: X circle shown only once the game has opened the X button (its slot found on the bottom screen, 64 px above Y, measured on a later-game map page); hidden again on an earlier save |
